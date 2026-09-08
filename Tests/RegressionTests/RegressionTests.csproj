@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <PublishAot>true</PublishAot>
+    <PublishTrimmed>true</PublishTrimmed>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../LazyBootstrap/Services/SavedataTransferService.cs" Link="SavedataTransferService.cs" />
+    <Compile Include="../../LazyBootstrap/FileSystem/LauncherPaths.cs" Link="LauncherPaths.cs" />
+    <Compile Include="../../LazyBootstrap/FileSystem/PathHelper.cs" Link="PathHelper.cs" />
+    <Compile Include="../../LazyBootstrap/FileSystem/DirectorySafety.cs" Link="DirectorySafety.cs" />
+    <Compile Include="../../LazyBootstrap.MediaUpdater/MediaUpdateSecurity.cs" Link="MediaUpdateSecurity.cs" />
+    <Compile Include="../../LazyBootstrap.MediaUpdater/MediaUpdateProtocol.cs" Link="MediaUpdateProtocol.cs" />
+    <Compile Include="../../LazyBootstrap.MediaUpdater/MediaUpdateSynchronizer.cs" Link="MediaUpdateSynchronizer.cs" />
+  </ItemGroup>
+</Project>

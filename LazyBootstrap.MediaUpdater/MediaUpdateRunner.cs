@@ -1,7 +1,6 @@
 using System;
 using System.Diagnostics;
 using System.IO;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -35,16 +34,14 @@ namespace LazyBootstrap.MediaUpdate
                     return 0;
                 }
 
-                string syncBat = MediaUpdateProtocol.FindShallowestFile(stagingPath, MediaUpdateProtocol.SyncBatchFileName);
-                if (string.IsNullOrEmpty(syncBat) || !File.Exists(syncBat))
+                MediaUpdateSynchronizer synchronizer;
+                try
                 {
-                    log($"错误: 在 staging 中未找到 {MediaUpdateProtocol.SyncBatchFileName}。");
-                    return 0;
+                    synchronizer = new MediaUpdateSynchronizer(gamePath, stagingPath);
                 }
-
-                if (!MediaUpdateSecurity.TryValidateStagingBatches(stagingPath, gamePath, out string securityError))
+                catch (IOException ex)
                 {
-                    string msg = securityError ?? MediaUpdateSecurity.BlockedNonGamePathMessage;
+                    string msg = MediaUpdateSecurity.BlockedNonGamePathMessage + Environment.NewLine + ex.Message;
                     if (onSecurityBlockUi != null)
                     {
                         onSecurityBlockUi(msg);
@@ -57,44 +54,17 @@ namespace LazyBootstrap.MediaUpdate
                     return ExitSecurityBlocked;
                 }
 
-                string syncDir = Path.GetDirectoryName(syncBat) ?? stagingPath;
-                string updaterLog = Path.Combine(gamePath, "updater_log.txt");
-
                 log("正在结束启动器…");
                 TryKillLauncher();
                 await Task.Delay(2000, cancellationToken).ConfigureAwait(true);
 
                 log("开始同步资源…");
-                int syncCode = await RunSyncBatchAsync(syncBat, syncDir, gamePath, log, cancellationToken).ConfigureAwait(true);
-                if (syncCode != 0)
-                {
-                    log("同步失败。退出代码: " + syncCode);
-                    if (File.Exists(updaterLog))
-                    {
-                        log("详见: " + updaterLog);
-                    }
-
-                    return 0;
-                }
-
-                string dataMods = Path.Combine(gamePath, "contents", "data_mods");
-                string cache = Path.Combine(dataMods, "_cache");
-                if (Directory.Exists(dataMods) && Directory.Exists(cache))
-                {
-                    log("正在清除 data_mods 缓存…");
-                    try
-                    {
-                        Directory.Delete(cache, true);
-                    }
-                    catch (Exception ex)
-                    {
-                        log("清理缓存时出现问题: " + ex.Message);
-                    }
-                }
+                synchronizer.Apply(log, cancellationToken);
 
                 log($"正在清理 {MediaUpdateProtocol.UpdateStagingFolderName}…");
                 try
                 {
+                    MediaUpdateSecurity.ValidateStagingDirectory(stagingPath, gamePath);
                     if (Directory.Exists(stagingPath))
                     {
                         Directory.Delete(stagingPath, true);
@@ -125,13 +95,13 @@ namespace LazyBootstrap.MediaUpdate
             catch (OperationCanceledException)
             {
                 log("已取消。");
+                return 1;
             }
             catch (Exception ex)
             {
                 log("错误: " + ex);
+                return 1;
             }
-
-            return 0;
         }
 
         // Outer shell path is game root LazyBootstrap.exe, not launcher/LazyBootstrap.exe.
@@ -185,65 +155,5 @@ namespace LazyBootstrap.MediaUpdate
             }
         }
 
-        private static async Task<int> RunSyncBatchAsync(
-            string syncBatPath,
-            string workingDirectory,
-            string gamePath,
-            Action<string> log,
-            CancellationToken cancellationToken)
-        {
-            string cmd = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "cmd.exe");
-            var startInfo = new ProcessStartInfo
-            {
-                FileName = cmd,
-                WorkingDirectory = workingDirectory,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = false,
-                StandardOutputEncoding = Encoding.UTF8
-            };
-            startInfo.ArgumentList.Add("/c");
-            startInfo.ArgumentList.Add("call");
-            startInfo.ArgumentList.Add(syncBatPath);
-            startInfo.Environment[MediaUpdateProtocol.GamePathVariableName] = gamePath;
-            startInfo.Environment[MediaUpdateProtocol.SyncFromLauncherVariableName] = "1";
-
-            using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
-
-            var sb = new StringBuilder(65536);
-            process.OutputDataReceived += (_, e) =>
-            {
-                if (e.Data == null)
-                {
-                    return;
-                }
-
-                sb.AppendLine(e.Data);
-            };
-
-            if (!process.Start())
-            {
-                return -1;
-            }
-
-            process.BeginOutputReadLine();
-            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(true);
-            string combined = sb.ToString();
-            if (combined.Length > 0)
-            {
-                const int max = 20000;
-                if (combined.Length > max)
-                {
-                    log(combined.Substring(0, max) + "…(truncated)");
-                }
-                else
-                {
-                    log(combined.TrimEnd());
-                }
-            }
-
-            return process.ExitCode;
-        }
     }
 }

@@ -174,8 +174,9 @@ namespace LazyBootstrap.UI
             }
         }
 
-        private static void ClearStagingDirectory(string stagingDirectoryPath)
+        private void ClearStagingDirectory(string stagingDirectoryPath)
         {
+            MediaUpdateSecurity.ValidateStagingDirectory(stagingDirectoryPath, _paths.BaseDir);
             if (Directory.Exists(stagingDirectoryPath))
             {
                 Directory.Delete(stagingDirectoryPath, true);
@@ -206,6 +207,7 @@ namespace LazyBootstrap.UI
         {
             try
             {
+                MediaUpdateSecurity.ValidateStagingDirectory(outputDir, _paths.BaseDir);
                 Directory.CreateDirectory(outputDir);
                 _logger.LogInformation("Update extraction directory prepared: {OutputDirectory}", outputDir);
             }

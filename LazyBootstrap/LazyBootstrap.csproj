@@ -85,6 +85,7 @@
 
     <ItemGroup>
         <Compile Include="..\LazyBootstrap.MediaUpdater\MediaUpdateProtocol.cs" Link="MediaUpdate\MediaUpdateProtocol.cs"/>
+        <Compile Include="..\LazyBootstrap.MediaUpdater\MediaUpdateSecurity.cs" Link="MediaUpdate\MediaUpdateSecurity.cs"/>
     </ItemGroup>
 
     <ItemGroup>
