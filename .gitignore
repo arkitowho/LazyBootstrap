@@ -9,6 +9,7 @@
 *.rsuser
 *.sln.docstates
 *.DotSettings.user
+.codegraph/
 
 # .NET build outputs
 **/bin/
