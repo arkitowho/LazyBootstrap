@@ -166,6 +166,25 @@ namespace LazyBootstrap.UI
                     await ShowEnvironmentScanErrorDialogAsync();
                 }
 
+                if (_pendingNativeTouchDeprecatedDialog)
+                {
+                    _pendingNativeTouchDeprecatedDialog = false;
+                    await ShowMessageDialogAsync(
+                        "“原生触控输入”选项已弃用",
+                        "新版本spice2x已默认启用原生触控，现有选项已自动关闭并移除",
+                        "我知道了");
+                }
+                else if (!string.IsNullOrWhiteSpace(_pendingNativeTouchMigrationError))
+                {
+                    string error = _pendingNativeTouchMigrationError;
+                    _pendingNativeTouchMigrationError = string.Empty;
+                    await ShowMessageDialogAsync(
+                        "旧选项处理失败",
+                        error,
+                        "我知道了",
+                        NotificationType.Warning);
+                }
+
                 QueueAutoLaunchIfEnabled();
             }
             catch (Exception ex)

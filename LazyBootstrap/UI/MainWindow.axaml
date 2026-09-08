@@ -534,15 +534,6 @@
                                                                 </Grid>
                                                                 <TextBlock Text="若副屏黑屏/闪烁/一帧一帧显示，可尝试开启" Opacity="0.7"
                                                                            FontSize="12" Margin="0,-20,0,0" />
-                                                                <Grid ColumnDefinitions="*,Auto"
-                                                                      VerticalAlignment="Center">
-                                                                    <TextBlock Text="原生触控输入" VerticalAlignment="Center" />
-                                                                    <ToggleSwitch x:Name="NativeTouchToggleSwitch"
-                                                                            Grid.Column="1" />
-                                                                </Grid>
-                                                                <TextBlock Text="使用Windows原生触控API，若出现触摸双击可开启"
-                                                                           Opacity="0.7"
-                                                                           FontSize="12" Margin="0,-20,0,0" />
                                                             </StackPanel>
                                                         </suki:GlassCard>
                                                     </suki:SettingsLayoutItem.Content>

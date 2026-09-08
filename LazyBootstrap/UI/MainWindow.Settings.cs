@@ -88,8 +88,6 @@ namespace LazyBootstrap.UI
 
             public bool SubForceRender { get; set; }
 
-            public bool NativeTouch { get; set; }
-
             public string ConfiguredAsioDriverName { get; set; } = string.Empty;
 
             public AsioDriverOption SelectedAsioDriver { get; set; }
@@ -148,12 +146,87 @@ namespace LazyBootstrap.UI
         private bool _isUpdatingServerPresetUi;
         private bool _isUpdatingAsioDriverUi;
         private bool _isUpdatingNetworkUi;
+        private bool _pendingNativeTouchDeprecatedDialog;
+        private string _pendingNativeTouchMigrationError = string.Empty;
 
         /// <summary>Loads the initial (startup) settings and applies them to the UI.</summary>
         private async Task InitializeSettingsStartupAsync()
         {
             await LoadSettingsStateAsync(_settingsState);
+            DisableDeprecatedNativeTouchAtStartup();
             ApplyStartupSettingsToUi();
+        }
+
+        private void DisableDeprecatedNativeTouchAtStartup()
+        {
+            const string optionName = "sdvxnativetouch";
+            string spiceXmlPath = _paths.ResolveSpiceXmlPath(_settingsState.UseSystemSpiceConfig);
+            bool enabledOptionFound = false;
+            _pendingNativeTouchDeprecatedDialog = false;
+            _pendingNativeTouchMigrationError = string.Empty;
+
+            try
+            {
+                // File.Exists also returns false on access errors; distinguish those from missing files.
+                try
+                {
+                    File.GetAttributes(spiceXmlPath);
+                }
+                catch (FileNotFoundException)
+                {
+                    return;
+                }
+                catch (DirectoryNotFoundException)
+                {
+                    return;
+                }
+
+                if (!_spiceXmlConfigEditor.TryLoadOptionsContext(
+                        spiceXmlPath,
+                        LoadOptions.PreserveWhitespace,
+                        false,
+                        out var context,
+                        out var message,
+                        out var warning))
+                {
+                    // Missing files, game entries and options do not require migration.
+                    if (!warning && !string.IsNullOrWhiteSpace(message))
+                    {
+                        throw new IOException(message);
+                    }
+
+                    return;
+                }
+
+                var enabledOptions = context.OptionsElement.Elements("option")
+                    .Where(option => string.Equals(option.Attribute("name")?.Value, optionName, StringComparison.Ordinal)
+                        && string.Equals(option.Attribute("value")?.Value, "/ENABLED", StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                if (enabledOptions.Count == 0)
+                {
+                    return;
+                }
+
+                enabledOptionFound = true;
+                // The lookup normally keeps the first duplicate, which may already be disabled.
+                context.OptionLookup[optionName] = enabledOptions[0];
+                foreach (var option in enabledOptions.Skip(1))
+                {
+                    option.SetAttributeValue("value", string.Empty);
+                }
+
+                _spiceXmlConfigEditor.ApplyUpdates(context, [new SpiceOptionUpdate(optionName, string.Empty)]);
+                _pendingNativeTouchDeprecatedDialog = true;
+                _logger.LogInformation("Deprecated native touch option disabled in active spice config: {SpiceXmlPath}", spiceXmlPath);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Deprecated native touch option migration failed. EnabledOptionFound={EnabledOptionFound}, SpiceXmlPath={SpiceXmlPath}", enabledOptionFound, spiceXmlPath);
+                _pendingNativeTouchMigrationError = enabledOptionFound
+                    ? "检测到已弃用的“原生触控输入”选项，但自动关闭失败。\n\n请检查配置文件是否被占用以及写入权限，然后重新启动程序。"
+                    : "无法读取当前 spice2x 配置，未能检查已弃用的“原生触控输入”选项。\n\n请检查配置文件是否有效、是否被占用以及读取权限，然后重新启动程序。";
+                _pendingNativeTouchMigrationError += $"\n\n配置文件：{spiceXmlPath}";
+            }
         }
 
         /// <summary>Warms up deferred settings options (ASIO/network/...) and applies them.</summary>
@@ -472,11 +545,6 @@ namespace LazyBootstrap.UI
             if (SubForceRenderToggleSwitch != null)
             {
                 SubForceRenderToggleSwitch.IsChecked = _settingsState.SubForceRender;
-            }
-
-            if (NativeTouchToggleSwitch != null)
-            {
-                NativeTouchToggleSwitch.IsChecked = _settingsState.NativeTouch;
             }
 
             if (Asio2ChToggleSwitch != null)
@@ -968,7 +1036,6 @@ namespace LazyBootstrap.UI
             BindToggleSwitch(NvidiaPerformanceProfileToggleSwitch, v => _settingsState.NvidiaPerformanceProfile = v, PersistSpice);
             BindToggleSwitch(SubWindowTopMostToggleSwitch, v => _settingsState.SubWindowTopMost = v, PersistSpice);
             BindToggleSwitch(SubForceRenderToggleSwitch, v => _settingsState.SubForceRender = v, PersistSpice);
-            BindToggleSwitch(NativeTouchToggleSwitch, v => _settingsState.NativeTouch = v, PersistSpice);
             BindToggleSwitch(CardIoToggleSwitch, v => _settingsState.CardIo = v, PersistSpice);
             BindToggleSwitch(HidSmartCardToggleSwitch, v => _settingsState.HidSmartCard = v, PersistSpice);
 
@@ -1105,7 +1172,6 @@ namespace LazyBootstrap.UI
             CreateBooleanOptionDescriptor("sp2x-nvprofile", state => state.NvidiaPerformanceProfile, (state, value) => state.NvidiaPerformanceProfile = value, "/ENABLED"),
             CreateBooleanOptionDescriptor("sdvxwsubtop", state => state.SubWindowTopMost, (state, value) => state.SubWindowTopMost = value, "/ENABLED"),
             CreateBooleanOptionDescriptor("sp2x-sdvxsubredraw", state => state.SubForceRender, (state, value) => state.SubForceRender = value, "/ENABLED"),
-            CreateBooleanOptionDescriptor("sdvxnativetouch", state => state.NativeTouch, (state, value) => state.NativeTouch = value, "/ENABLED"),
             new("sp2x-sdvxasio",
                 state => state.SelectedAsioDriver?.DriverName ?? state.ConfiguredAsioDriverName ?? "",
                 (state, value) => state.ConfiguredAsioDriverName = value ?? ""),
