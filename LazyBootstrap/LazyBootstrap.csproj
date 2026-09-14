@@ -11,7 +11,7 @@
         <Nullable>disable</Nullable>
         <ImplicitUsings>disable</ImplicitUsings>
         <InvariantGlobalization>false</InvariantGlobalization>
-        <Version>26.5</Version>
+        <Version>26.5.1</Version>
         <AssemblyTitle>Launcher for Lazy SDVX</AssemblyTitle>
         <Description>A tool made for SDVX with spice2x</Description>
         <Company>LazyBootstrap - Lazy SDVX</Company>
