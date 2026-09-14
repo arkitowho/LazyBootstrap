@@ -11,12 +11,22 @@
     <PublishTrimmed>true</PublishTrimmed>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Remove="artifacts/**/*.cs" />
     <Compile Include="../../LazyBootstrap/Services/SavedataTransferService.cs" Link="SavedataTransferService.cs" />
     <Compile Include="../../LazyBootstrap/FileSystem/LauncherPaths.cs" Link="LauncherPaths.cs" />
     <Compile Include="../../LazyBootstrap/FileSystem/PathHelper.cs" Link="PathHelper.cs" />
     <Compile Include="../../LazyBootstrap/FileSystem/DirectorySafety.cs" Link="DirectorySafety.cs" />
     <Compile Include="../../LazyBootstrap.MediaUpdater/MediaUpdateSecurity.cs" Link="MediaUpdateSecurity.cs" />
     <Compile Include="../../LazyBootstrap.MediaUpdater/MediaUpdateProtocol.cs" Link="MediaUpdateProtocol.cs" />
-    <Compile Include="../../LazyBootstrap.MediaUpdater/MediaUpdateSynchronizer.cs" Link="MediaUpdateSynchronizer.cs" />
+    <Compile Include="../../LazyBootstrap.MediaUpdater/MediaUpdateRunner.cs" Link="MediaUpdateRunner.cs" />
+    <Compile Include="../../LazyBootstrap.MediaUpdater/MediaUpdateManifest.cs" Link="MediaUpdateManifest.cs" />
+    <Compile Include="../../LazyBootstrap.MediaUpdater/MediaUpdateChecksums.cs" Link="MediaUpdateChecksums.cs" />
+    <Compile Include="../../LazyBootstrap.MediaUpdater/MediaUpdateLog.cs" Link="MediaUpdateLog.cs" />
+    <Compile Include="../../LazyBootstrap.MediaUpdater/MediaUpdateAccess.cs" Link="MediaUpdateAccess.cs" />
+    <Compile Include="../../LazyBootstrap.MediaUpdater/MediaUpdatePlan.cs" Link="MediaUpdatePlan.cs" />
+    <Compile Include="../../LazyBootstrap.MediaUpdater/MediaXmlEditor.cs" Link="MediaXmlEditor.cs" />
+    <Compile Include="../../LazyBootstrap.MediaUpdater/MediaUpdateEngine.cs" Link="MediaUpdateEngine.cs" />
+    <Compile Include="../../LazyBootstrap/Platform/MediaUpdaterPendingUpdateService.cs" Link="MediaUpdaterPendingUpdateService.cs" />
+    <PackageReference Include="Serilog" Version="4.3.1" />
   </ItemGroup>
 </Project>

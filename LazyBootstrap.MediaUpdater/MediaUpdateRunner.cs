@@ -3,157 +3,74 @@ using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using LazyBootstrap.FileSystem;
 
-namespace LazyBootstrap.MediaUpdate
+namespace LazyBootstrap.MediaUpdate;
+
+internal static class MediaUpdateRunner
 {
-    internal static class MediaUpdateRunner
+    public static async Task<int> RunAsync(string game, string package, int parentPid, Action<string> report,
+        CancellationToken cancel = default)
     {
-        public const int ExitSecurityBlocked = 4;
-
-        public static async Task<int> RunAsync(
-            string gamePath,
-            string stagingPath,
-            Action<string> log,
-            CancellationToken cancellationToken = default,
-            Action onUpdateComplete = null,
-            Action<string> onSecurityBlockUi = null)
+        void Record(string message)
         {
-            if (log == null)
+            try { using var log = new MediaUpdateLog(game, true); log.Write(message); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            try { report?.Invoke(message); } catch { }
+        }
+        try
+        {
+            Record("正在等待启动器退出...");
+            await WaitForParentAsync(parentPid, cancel);
+            await Task.Run(() =>
             {
-                throw new ArgumentNullException(nameof(log));
-            }
-
+                using var engine = MediaUpdateEngine.Prepare(game, package, report, cancel);
+                engine.Apply(cancel);
+            }, cancel);
+            // Only the fixed extraction directory is cleaned; old recovery material is left alone.
+            string staging = MediaUpdateProtocol.GetUpdateStagingDirectoryPath(game);
             try
             {
-                gamePath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(gamePath));
-                stagingPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(stagingPath));
-
-                if (!MediaUpdateProtocol.IsValidGameRoot(gamePath))
-                {
-                    log("错误: 游戏目录中未找到 contents 或 asphyxia。");
-                    return 0;
-                }
-
-                MediaUpdateSynchronizer synchronizer;
-                try
-                {
-                    synchronizer = new MediaUpdateSynchronizer(gamePath, stagingPath);
-                }
-                catch (IOException ex)
-                {
-                    string msg = MediaUpdateSecurity.BlockedNonGamePathMessage + Environment.NewLine + ex.Message;
-                    if (onSecurityBlockUi != null)
-                    {
-                        onSecurityBlockUi(msg);
-                    }
-                    else
-                    {
-                        log(msg);
-                    }
-
-                    return ExitSecurityBlocked;
-                }
-
-                log("正在结束启动器…");
-                TryKillLauncher();
-                await Task.Delay(2000, cancellationToken).ConfigureAwait(true);
-
-                log("开始同步资源…");
-                synchronizer.Apply(log, cancellationToken);
-
-                log($"正在清理 {MediaUpdateProtocol.UpdateStagingFolderName}…");
-                try
-                {
-                    MediaUpdateSecurity.ValidateStagingDirectory(stagingPath, gamePath);
-                    if (Directory.Exists(stagingPath))
-                    {
-                        Directory.Delete(stagingPath, true);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    log("清理临时目录时出现问题: " + ex.Message);
-                }
-
-                onUpdateComplete?.Invoke();
-
-                await Task.Delay(5000, cancellationToken).ConfigureAwait(true);
-
-                string gameLauncherPath = Path.Combine(gamePath, MediaUpdateProtocol.GameLauncherExeName);
-                string outerShellPath = Path.Combine(gamePath, MediaUpdateProtocol.LauncherProcessImageFileName);
-                if (!TryStartShellExe(gameLauncherPath, gamePath, log, MediaUpdateProtocol.GameLauncherExeName))
-                {
-                    if (!TryStartShellExe(outerShellPath, gamePath, log, MediaUpdateProtocol.LauncherProcessImageFileName))
-                    {
-                        log(
-                            $"未找到 {MediaUpdateProtocol.GameLauncherExeName} 与 {MediaUpdateProtocol.LauncherProcessImageFileName}，请从游戏根目录手动运行启动器。");
-                    }
-                }
-
-                return 0;
+                if (DirectorySafety.IsWithin(package, staging) && Directory.Exists(staging)) Directory.Delete(staging, true);
             }
-            catch (OperationCanceledException)
-            {
-                log("已取消。");
-                return 1;
-            }
-            catch (Exception ex)
-            {
-                log("错误: " + ex);
-                return 1;
-            }
+            catch (Exception ex) { Record("更新成功，但解压目录清理失败：" + ex.Message); }
+            Record("更新成功，正在重新启动启动器。");
+            StartLauncher(game, Record);
+            return 0;
         }
+        catch (OperationCanceledException) { Record("更新已取消，未进行安装。"); return 1; }
+        catch (Exception ex) { Record(ex.Message); return 1; }
+    }
 
-        // Outer shell path is game root LazyBootstrap.exe, not launcher/LazyBootstrap.exe.
-        private static bool TryStartShellExe(string exePath, string workingDirectory, Action<string> log, string displayName)
+    internal static async Task WaitForParentAsync(int parentPid, CancellationToken cancel)
+    {
+        if (parentPid <= 0) throw new IOException("启动器进程 ID 无效。");
+        Process parent;
+        try { parent = Process.GetProcessById(parentPid); }
+        catch (ArgumentException) { return; }
+        using (parent)
+        using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancel))
         {
-            if (string.IsNullOrEmpty(exePath) || !File.Exists(exePath))
-            {
-                return false;
-            }
+            timeout.CancelAfter(TimeSpan.FromSeconds(10));
+            try { await parent.WaitForExitAsync(timeout.Token); }
+            catch (OperationCanceledException) when (!cancel.IsCancellationRequested)
+            { throw new IOException("启动器在 10 秒内未退出，未进行安装。请关闭启动器后重试。"); }
+        }
+    }
 
+    private static void StartLauncher(string game, Action<string> report)
+    {
+        foreach (string relative in new[] { "启动.exe", "LazyBootstrap.exe", "Launcher.exe", "launcher/LazyBootstrap.exe" })
+        {
+            string path = Path.Combine(game, relative);
+            if (!File.Exists(path)) continue;
             try
             {
-                var psi = new ProcessStartInfo
-                {
-                    FileName = exePath,
-                    WorkingDirectory = workingDirectory,
-                    UseShellExecute = true
-                };
-                Process.Start(psi);
-                return true;
+                using var process = Process.Start(new ProcessStartInfo(path) { UseShellExecute = true, WorkingDirectory = Path.GetDirectoryName(path)! });
+                if (process != null) return;
             }
-            catch (Exception ex)
-            {
-                log("无法启动 " + displayName + ": " + ex.Message);
-                return false;
-            }
+            catch (Exception ex) { report("无法启动启动器：" + ex.Message); }
         }
-
-        private static void TryKillLauncher()
-        {
-            try
-            {
-                string name = Path.GetFileNameWithoutExtension(MediaUpdateProtocol.LauncherProcessImageFileName);
-                foreach (var p in Process.GetProcessesByName(name))
-                {
-                    try
-                    {
-                        p.Kill();
-                    }
-                    catch
-                    {
-                    }
-                    finally
-                    {
-                        p.Dispose();
-                    }
-                }
-            }
-            catch
-            {
-            }
-        }
-
+        report("请从游戏根目录手动启动启动器。");
     }
 }

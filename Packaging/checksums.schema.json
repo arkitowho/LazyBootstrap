@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "更新包 SHA-256 校验清单",
+  "description": "放置于 update.json 同级；包含包内全部文件，仅排除根目录 checksums.json 自身。路径唯一性、实际文件集合和 Windows 路径规则由更新器额外检查。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "algorithm", "files"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "algorithm": { "const": "SHA256" },
+    "files": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "sha256"],
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^[^\\\\<>:\"|?*\\u0000-\\u001f]+$",
+            "description": "相对于包根目录的文件路径，分隔符必须为 /；禁止绝对路径、空片段、.、..、Windows 设备名、末尾点或空格。"
+          },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        }
+      }
+    }
+  }
+}

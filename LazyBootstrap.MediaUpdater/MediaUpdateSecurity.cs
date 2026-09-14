@@ -1,31 +1,47 @@
 using System;
 using System.IO;
+using System.Linq;
 using LazyBootstrap.FileSystem;
 
-namespace LazyBootstrap.MediaUpdate
+namespace LazyBootstrap.MediaUpdate;
+
+internal static class MediaUpdateSecurity
 {
-    internal static class MediaUpdateSecurity
+    public const string StateFolder = MediaUpdateProtocol.UpdateStateFolderName;
+    public const string UpdaterPath = "launcher/MediaUpdater.exe";
+    public const string PendingPath = UpdaterPath + ".pending";
+
+    public static string ValidateRelativePath(string path)
     {
-        public const string BlockedNonGamePathMessage =
-            "更新路径不安全，已停止更新。请检查更新目录及其中的符号链接或目录联接。";
-
-        public static void ValidateStagingDirectory(string stagingPath, string gamePath)
+        if (string.IsNullOrWhiteSpace(path) || Path.IsPathRooted(path)) throw new IOException("必须使用非空相对路径。");
+        string normalized = path.Replace('\\', '/');
+        foreach (string part in normalized.Split('/'))
         {
-            string expectedStaging = Path.Combine(DirectorySafety.Normalize(gamePath), MediaUpdateProtocol.UpdateStagingFolderName);
-            if (!string.Equals(DirectorySafety.Normalize(stagingPath), expectedStaging, StringComparison.OrdinalIgnoreCase))
-                throw new IOException("更新临时目录必须是游戏根目录下的 update_tmp，不能使用游戏目录本身或其他目录。");
-            DirectorySafety.EnsureTreeHasNoLinks(stagingPath);
+            if (part.Length == 0 || part is "." or ".." || part.EndsWith(' ') || part.EndsWith('.')
+                || part.Any(c => c < 32 || "<>:\"|?*".Contains(c))) throw new IOException("更新路径含有非法片段：" + path);
+            string stem = part.Split('.')[0].ToUpperInvariant();
+            if (stem is "CON" or "PRN" or "AUX" or "NUL" or "CLOCK$" or "CONIN$" or "CONOUT$"
+                || ((stem.StartsWith("COM") || stem.StartsWith("LPT")) && stem.Length == 4 && "123456789¹²³".Contains(stem[3])))
+                throw new IOException("更新路径不能使用 Windows 设备名：" + path);
         }
-
-        public static string ResolveDestination(string relativePath, string gamePath)
-        {
-            string destination = DirectorySafety.Normalize(Path.Combine(gamePath, relativePath));
-            if (!DirectorySafety.IsWithin(destination, gamePath)
-                || string.Equals(destination, DirectorySafety.Normalize(gamePath), StringComparison.OrdinalIgnoreCase)
-                || DirectorySafety.IsWithin(destination, Path.Combine(gamePath, MediaUpdateProtocol.UpdateStagingFolderName)))
-                throw new IOException("更新文件的目标路径超出了允许范围。");
-            DirectorySafety.EnsureNoLinks(destination);
-            return destination;
-        }
+        return normalized;
     }
+
+    public static string ResolveDestination(string relativePath, string gamePath, bool internalPending = false)
+    {
+        string relative = ValidateRelativePath(relativePath);
+        string first = relative.Split('/')[0];
+        if (first.Equals(StateFolder, StringComparison.OrdinalIgnoreCase)
+            || first.Equals(MediaUpdateProtocol.UpdateStagingFolderName, StringComparison.OrdinalIgnoreCase)
+            || first.Equals(MediaUpdateProtocol.UpdateLogFileName, StringComparison.OrdinalIgnoreCase)
+            || relative.Split('/').Any(p => p.StartsWith(".media-update-", StringComparison.OrdinalIgnoreCase))
+            || (!internalPending && (Same(relative, PendingPath) || relative.StartsWith(PendingPath + "/", StringComparison.OrdinalIgnoreCase))))
+            throw new IOException("更新目标属于更新程序内部保留路径：" + relative);
+        string destination = DirectorySafety.Normalize(Path.Combine(gamePath, relative.Replace('/', Path.DirectorySeparatorChar)));
+        if (!DirectorySafety.IsWithin(destination, gamePath) || Same(destination, DirectorySafety.Normalize(gamePath)))
+            throw new IOException("更新目标超出游戏目录。");
+        return destination;
+    }
+
+    public static bool Same(string left, string right) => string.Equals(left.Replace('\\', '/'), right.Replace('\\', '/'), StringComparison.OrdinalIgnoreCase);
 }

@@ -104,7 +104,7 @@ namespace LazyBootstrap.FileSystem
 
         public string GetUpdateStagingDirectoryPath()
         {
-            return Path.Combine(BaseDir, "update_tmp");
+            return MediaUpdate.MediaUpdateProtocol.GetUpdateStagingDirectoryPath(BaseDir);
         }
 
         public string ResolveSevenZipExecutablePath()

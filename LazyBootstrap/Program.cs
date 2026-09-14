@@ -4,6 +4,7 @@ using Serilog;
 using LazyBootstrap.Application;
 using LazyBootstrap.Platform;
 using LazyBootstrap.Serialization;
+using System.Runtime.InteropServices;
 
 namespace LazyBootstrap
 {
@@ -18,7 +19,8 @@ namespace LazyBootstrap
             {
                 AppServices.InitializeSerilog(args);
                 Log.Information("LazyBootstrap process started.");
-                MediaUpdaterPendingUpdateService.ApplyPendingUpdate(AppServices.Paths.ApplicationDirectoryPath);
+                if (!MediaUpdaterPendingUpdateService.ApplyPendingUpdate(AppServices.Paths.ApplicationDirectoryPath))
+                    ShowUpdateError("资源更新已完成，但更新器替换失败。已保留待替换文件，下次启动将重试。");
 
                 composition = new ApplicationComposition(AppServices.Paths);
                 App.Composition = composition;
@@ -45,6 +47,11 @@ namespace LazyBootstrap
                 AppServices.Dispose();
             }
         }
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        private static extern int MessageBoxW(nint window, string text, string caption, uint type);
+
+        private static void ShowUpdateError(string message) => MessageBoxW(nint.Zero, message, "更新提示", 0x10);
 
         public static AppBuilder BuildAvaloniaApp()
             => AppBuilder.Configure<App>()

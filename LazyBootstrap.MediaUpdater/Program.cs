@@ -1,146 +1,52 @@
 using System;
+using System.Globalization;
 using System.IO;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using LazyBootstrap.MediaUpdate;
 
-namespace LazyBootstrap.MediaUpdater
+namespace LazyBootstrap.MediaUpdater;
+
+internal static class Program
 {
-    internal static class Program
+    private static async Task<int> Main(string[] args)
     {
-        private static async Task<int> Main(string[] args)
+        Console.OutputEncoding = Encoding.UTF8;
+        try
         {
+            string game = null, package = null, parent = null;
+            for (int i = 0; i < args.Length; i++)
+            {
+                string name = args[i];
+                int equals = name.IndexOf('=');
+                string value;
+                if (equals >= 0) { value = name[(equals + 1)..]; name = name[..equals]; }
+                else if (++i < args.Length) value = args[i];
+                else throw new IOException("缺少参数值：" + name);
+                if (name == "--game" && game == null) game = value;
+                else if (name == "--package" && package == null) package = value;
+                else if (name == "--parent-pid" && parent == null) parent = value;
+                else throw new IOException("更新程序参数无效或重复：" + name);
+            }
+            if (string.IsNullOrWhiteSpace(game) || string.IsNullOrWhiteSpace(package)
+                || !int.TryParse(parent, NumberStyles.None, CultureInfo.InvariantCulture, out int parentPid) || parentPid <= 0)
+                throw new IOException("请从启动器选择更新包。内部用法：MediaUpdater.exe --game <游戏目录> --package <包目录> --parent-pid <启动器进程 ID>");
+            using var cancel = new CancellationTokenSource();
+            ConsoleCancelEventHandler handler = (_, e) => { e.Cancel = true; cancel.Cancel(); };
+            Console.CancelKeyPress += handler;
             try
             {
-                Console.OutputEncoding = Encoding.UTF8;
-                Console.InputEncoding = Encoding.UTF8;
-            }
-            catch
-            {
-            }
-
-            if (args == null || args.Length == 0)
-            {
-                Console.Error.WriteLine("请通过启动器启动。");
-                return 1;
-            }
-
-            if (!TryParseArguments(args, out string gamePath, out string stagingPath, out string parseError))
-            {
-                Console.Error.WriteLine(string.IsNullOrEmpty(parseError) ? "参数无效。" : parseError);
-                return 2;
-            }
-
-            try
-            {
-                int exit = await MediaUpdateRunner.RunAsync(
-                    gamePath,
-                    stagingPath,
-                    static line => Console.WriteLine(line),
-                    onUpdateComplete: WriteUpdateCompleteInGreen,
-                    onSecurityBlockUi: SecurityConsolePresentation.ShowBlockedDriveWarning).ConfigureAwait(true);
-                return exit;
-            }
-            catch (Exception ex)
-            {
-                Console.Error.WriteLine(ex);
-                return 3;
-            }
-        }
-
-        private static void WriteUpdateCompleteInGreen()
-        {
-            ConsoleColor previous = Console.ForegroundColor;
-            try
-            {
-                Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine();
-                Console.WriteLine("Update Complete！");
-            }
-            finally
-            {
-                Console.ForegroundColor = previous;
-            }
-        }
-
-        private static bool TryParseArguments(
-            string[] args,
-            out string gamePath,
-            out string stagingPath,
-            out string error)
-        {
-            gamePath = null;
-            stagingPath = null;
-            error = null;
-            string rawGamePath = null;
-            string rawStagingPath = null;
-
-            for (var index = 0; index < args.Length; index++)
-            {
-                string argument = args[index];
-                if (string.Equals(argument, "--game", StringComparison.OrdinalIgnoreCase))
+                int result = await MediaUpdateRunner.RunAsync(Path.GetFullPath(game), Path.GetFullPath(package), parentPid, Console.WriteLine, cancel.Token);
+                if (result != 0 && !Console.IsInputRedirected)
                 {
-                    if (!TryTakeArgumentValue(args, ref index, out rawGamePath))
-                    {
-                        error = "缺少 --game 路径。";
-                        return false;
-                    }
-
-                    continue;
+                    Console.WriteLine("按回车关闭此窗口。");
+                    Console.ReadLine();
                 }
-
-                if (string.Equals(argument, "--staging", StringComparison.OrdinalIgnoreCase))
-                {
-                    if (!TryTakeArgumentValue(args, ref index, out rawStagingPath))
-                    {
-                        error = "缺少 --staging 路径。";
-                        return false;
-                    }
-
-                    continue;
-                }
-
-                if (argument.StartsWith("--game=", StringComparison.OrdinalIgnoreCase))
-                {
-                    rawGamePath = argument.Substring("--game=".Length).Trim();
-                    continue;
-                }
-
-                if (argument.StartsWith("--staging=", StringComparison.OrdinalIgnoreCase))
-                {
-                    rawStagingPath = argument.Substring("--staging=".Length).Trim();
-                }
+                return result;
             }
-
-            if (string.IsNullOrWhiteSpace(rawGamePath) || string.IsNullOrWhiteSpace(rawStagingPath))
-            {
-                error = "用法: MediaUpdater.exe --game <游戏根目录> --staging <update_tmp 目录>";
-                return false;
-            }
-
-            try
-            {
-                gamePath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rawGamePath.Trim('"')));
-                stagingPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rawStagingPath.Trim('"')));
-                return true;
-            }
-            catch (Exception ex)
-            {
-                error = ex.Message;
-                return false;
-            }
+            finally { Console.CancelKeyPress -= handler; }
         }
-
-        private static bool TryTakeArgumentValue(string[] args, ref int index, out string value)
-        {
-            value = null;
-            if (index + 1 >= args.Length)
-            {
-                return false;
-            }
-
-            value = args[++index];
-            return !string.IsNullOrWhiteSpace(value);
-        }
+        catch (Exception ex) { Console.Error.WriteLine(ex.Message); return 2; }
     }
 }

@@ -10,8 +10,9 @@ using LazyBootstrap.MediaUpdate;
 
 internal static class Program
 {
-    private static int Main()
+    private static int Main(string[] args)
     {
+        if (args.Length > 0) return UpdateRegression.Worker(args);
         int failed = 0;
         Run("同目录迁移保留存档", root =>
         {
@@ -26,21 +27,6 @@ internal static class Program
             catch (IOException) { }
             Assert(File.Exists(save) && File.ReadAllText(save) == "original", "原存档被删除或改变");
         }, ref failed);
-        Run("更新同步不执行越界脚本", root =>
-        {
-            string game = Path.Combine(root, "game");
-            string staging = Path.Combine(game, "update_tmp");
-            Directory.CreateDirectory(Path.Combine(game, "contents"));
-            Directory.CreateDirectory(Path.Combine(game, "asphyxia"));
-            Write(Path.Combine(staging, "sync.bat"), "@echo off\r\necho test > \"%LAZY_KFC_UPDATE_GAME_PATH%\\..\\outside.txt\"\r\n");
-            Write(Path.Combine(staging, "source", "contents", "resource.txt"), "updated");
-            string outside = Path.Combine(root, "outside.txt");
-            Write(outside, "original");
-            new MediaUpdateSynchronizer(game, staging).Apply(static _ => { });
-            Assert(File.ReadAllText(outside) == "original", "游戏目录外的文件被改变");
-            Assert(File.ReadAllText(Path.Combine(game, "contents", "resource.txt")) == "updated", "正常资源未同步");
-        }, ref failed);
-
         Run("迁移拒绝规范化后相同的路径", root =>
         {
             string save = Path.Combine(root, "saves");
@@ -125,128 +111,7 @@ internal static class Program
             ExpectIo(() => CreateService(root).ReplaceDirectory(Path.Combine(alias, "savedata"), Path.Combine(source, "savedata")));
             Assert(File.ReadAllText(Path.Combine(source, "savedata", "player")) == "original", "目录联接导致存档改变");
         }, ref failed);
-        Run("完整更新保留配置及更新器并镜像资源", root =>
-        {
-            var (game, staging, source) = CreateUpdate(root, nested: true);
-            Write(Path.Combine(game, "launcher", "config.toml"), "user-config");
-            Write(Path.Combine(game, "launcher", "MediaUpdater.exe"), "running-updater");
-            Write(Path.Combine(game, "launcher", "old.dll"), "old");
-            Write(Path.Combine(game, "launcher", "old-libs", "old.dll"), "old");
-            Write(Path.Combine(game, "contents", "unrelated"), "keep");
-            Write(Path.Combine(game, "contents", "data_mods", "omnimix", "old-song"), "old");
-            Write(Path.Combine(game, "contents", "data_mods", "omnimix", "old-dir", "old-song"), "old");
-            Write(Path.Combine(game, "contents", "data_mods", "_cache", "cache"), "old");
-            Write(Path.Combine(source, "launcher", "config.toml"), "package-config");
-            Write(Path.Combine(source, "launcher", "MediaUpdater.exe"), "new-updater");
-            Write(Path.Combine(source, "launcher", "MediaUpdater.exe.pending"), "untrusted-pending");
-            Write(Path.Combine(source, "launcher", "new.dll"), "new");
-            Write(Path.Combine(source, "launcher", "Libs", "new.dll"), "new-library");
-            Write(Path.Combine(source, "contents", "data_mods", "omnimix", "new-song"), "new-song");
-            new MediaUpdateSynchronizer(game, staging).Apply(static _ => { });
-            Assert(File.ReadAllText(Path.Combine(game, "launcher", "config.toml")) == "user-config", "用户配置被覆盖");
-            Assert(File.ReadAllText(Path.Combine(game, "launcher", "MediaUpdater.exe")) == "running-updater", "正在运行的更新器被替换");
-            Assert(File.ReadAllText(Path.Combine(game, "launcher", "MediaUpdater.exe.pending")) == "new-updater", "更新器未正确暂存");
-            Assert(!File.Exists(Path.Combine(game, "launcher", "old.dll")) && !Directory.Exists(Path.Combine(game, "launcher", "old-libs")), "旧启动器文件未清理");
-            Assert(File.ReadAllText(Path.Combine(game, "launcher", "Libs", "new.dll")) == "new-library", "新依赖未复制");
-            Assert(File.ReadAllText(Path.Combine(game, "contents", "unrelated")) == "keep", "无关游戏资源被删除");
-            Assert(!File.Exists(Path.Combine(game, "contents", "data_mods", "omnimix", "old-song"))
-                && !Directory.Exists(Path.Combine(game, "contents", "data_mods", "omnimix", "old-dir")), "omnimix 旧资源未删除");
-            Assert(File.ReadAllText(Path.Combine(game, "contents", "data_mods", "omnimix", "new-song")) == "new-song", "omnimix 新资源未复制");
-            Assert(!Directory.Exists(Path.Combine(game, "contents", "data_mods", "_cache")), "缓存未清除");
-            Assert(File.Exists(Path.Combine(game, "updater_log.txt")), "更新日志未生成");
-            Assert(File.Exists(Path.Combine(source, "launcher", "new.dll")), "更新源被提前清理");
-        }, ref failed);
-        Run("资源更新不清理启动器", root =>
-        {
-            var (game, staging, source) = CreateUpdate(root);
-            Write(Path.Combine(game, "launcher", "existing.dll"), "keep");
-            Write(Path.Combine(game, "contents", "config.toml"), "user");
-            Write(Path.Combine(source, "contents", "config.toml"), "package");
-            new MediaUpdateSynchronizer(game, staging).Apply(static _ => { });
-            Assert(File.ReadAllText(Path.Combine(game, "launcher", "existing.dll")) == "keep", "资源更新清理了启动器");
-            Assert(File.ReadAllText(Path.Combine(game, "contents", "config.toml")) == "user", "配置被覆盖");
-        }, ref failed);
-        Run("更新拒绝游戏根目录或外部暂存目录", root =>
-        {
-            var (game, _, _) = CreateUpdate(root);
-            ExpectIo(() => new MediaUpdateSynchronizer(game, game));
-            ExpectIo(() => new MediaUpdateSynchronizer(game, Path.Combine(root, "outside")));
-            Assert(Directory.Exists(Path.Combine(game, "contents")), "游戏目录被改变");
-        }, ref failed);
-        Run("更新拒绝写入自身暂存目录", root =>
-        {
-            var (game, staging, source) = CreateUpdate(root);
-            Write(Path.Combine(source, "update_tmp", "payload"), "bad");
-            ExpectIo(() => new MediaUpdateSynchronizer(game, staging));
-            Assert(!File.Exists(Path.Combine(game, "contents", "resource.txt")), "拒绝之前已经写入文件");
-        }, ref failed);
-        Run("更新拒绝源目录联接", root =>
-        {
-            var (game, staging, source) = CreateUpdate(root);
-            string outside = Path.Combine(root, "outside");
-            Write(Path.Combine(outside, "sentinel"), "original");
-            CreateJunction(Path.Combine(source, "linked"), outside);
-            ExpectIo(() => new MediaUpdateSynchronizer(game, staging));
-            Assert(File.ReadAllText(Path.Combine(outside, "sentinel")) == "original", "外部源目录被改变");
-            Assert(!File.Exists(Path.Combine(game, "contents", "resource.txt")), "拒绝之前已经写入文件");
-        }, ref failed);
-        Run("更新拒绝目标目录联接且不清理启动器", root =>
-        {
-            var (game, staging, source) = CreateUpdate(root);
-            string outside = Path.Combine(root, "outside");
-            Write(Path.Combine(outside, "sentinel"), "original");
-            CreateJunction(Path.Combine(game, "linked"), outside);
-            Write(Path.Combine(source, "linked", "sentinel"), "changed");
-            Write(Path.Combine(source, "launcher", "new.dll"), "new");
-            Write(Path.Combine(game, "launcher", "old.dll"), "original-library");
-            ExpectIo(() => new MediaUpdateSynchronizer(game, staging));
-            Assert(File.ReadAllText(Path.Combine(outside, "sentinel")) == "original", "外部目标目录被改变");
-            Assert(File.ReadAllText(Path.Combine(game, "launcher", "old.dll")) == "original-library", "预检失败前已经清理启动器");
-        }, ref failed);
-        Run("更新拒绝缓存目录联接", root =>
-        {
-            var (game, staging, _) = CreateUpdate(root);
-            string outside = Path.Combine(root, "outside");
-            Write(Path.Combine(outside, "sentinel"), "original");
-            Directory.CreateDirectory(Path.Combine(game, "contents", "data_mods"));
-            CreateJunction(Path.Combine(game, "contents", "data_mods", "_cache"), outside);
-            ExpectIo(() => new MediaUpdateSynchronizer(game, staging));
-            Assert(File.ReadAllText(Path.Combine(outside, "sentinel")) == "original", "外部缓存目标被改变");
-        }, ref failed);
-        Run("更新替换硬链接而不写穿外部文件", root =>
-        {
-            var (game, staging, _) = CreateUpdate(root);
-            string outside = Path.Combine(root, "outside-file");
-            string outsideLog = Path.Combine(root, "outside-log");
-            Write(outside, "original-file");
-            Write(outsideLog, "original-log");
-            Assert(CreateHardLink(Path.Combine(game, "contents", "resource.txt"), outside, IntPtr.Zero), "无法创建测试硬链接");
-            Assert(CreateHardLink(Path.Combine(game, "updater_log.txt"), outsideLog, IntPtr.Zero), "无法创建日志硬链接");
-            new MediaUpdateSynchronizer(game, staging).Apply(static _ => { });
-            Assert(File.ReadAllText(outside) == "original-file", "外部硬链接文件被改变");
-            Assert(File.ReadAllText(outsideLog) == "original-log", "外部硬链接日志被改变");
-            Assert(File.ReadAllText(Path.Combine(game, "contents", "resource.txt")) == "new-resource", "硬链接位置未更新");
-        }, ref failed);
-        Run("空更新包在清理之前被拒绝", root =>
-        {
-            var (game, staging, source) = CreateUpdate(root);
-            string resource = Path.GetFullPath(Path.Combine(source, "contents", "resource.txt"));
-            Assert(DirectorySafety.IsWithin(resource, root), "测试删除路径越界");
-            File.Delete(resource);
-            Directory.CreateDirectory(Path.Combine(source, "launcher"));
-            Write(Path.Combine(game, "launcher", "old.dll"), "keep");
-            ExpectIo(() => new MediaUpdateSynchronizer(game, staging));
-            Assert(File.ReadAllText(Path.Combine(game, "launcher", "old.dll")) == "keep", "空更新包删除了启动器");
-        }, ref failed);
-        Run("已取消更新不修改文件", root =>
-        {
-            var (game, staging, _) = CreateUpdate(root);
-            var synchronizer = new MediaUpdateSynchronizer(game, staging);
-            bool cancelled = false;
-            try { synchronizer.Apply(static _ => { }, new CancellationToken(canceled: true)); }
-            catch (OperationCanceledException) { cancelled = true; }
-            Assert(cancelled && !File.Exists(Path.Combine(game, "contents", "resource.txt")), "取消更新仍写入文件");
-        }, ref failed);
+        failed += UpdateRegression.RunAll();
         Console.WriteLine($"失败用例数：{failed}");
         return failed == 0 ? 0 : 1;
     }
@@ -270,19 +135,6 @@ internal static class Program
         try { action(); }
         catch (IOException) { return; }
         throw new Exception("预期拒绝操作，但操作未被拒绝");
-    }
-
-    private static (string Game, string Staging, string Source) CreateUpdate(string root, bool nested = false)
-    {
-        string game = Path.Combine(root, "game");
-        string staging = Path.Combine(game, "update_tmp");
-        string package = nested ? Path.Combine(staging, "UPDATE_LAZY_KFC") : staging;
-        string source = Path.Combine(package, "source");
-        Directory.CreateDirectory(Path.Combine(game, "contents"));
-        Directory.CreateDirectory(Path.Combine(game, "asphyxia"));
-        Write(Path.Combine(package, "sync.bat"), "@echo off\r\nexit /b 0\r\n");
-        Write(Path.Combine(source, "contents", "resource.txt"), "new-resource");
-        return (game, staging, source);
     }
 
     private static void CreateJunction(string link, string target)

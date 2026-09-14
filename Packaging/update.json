@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "operations": [
+    {
+      "type": "copy",
+      "source": "source/contents",
+      "target": "contents"
+    },
+    {
+      "type": "mirror",
+      "source": "source/launcher",
+      "target": "launcher"
+    },
+    {
+      "type": "mirror",
+      "source": "source/contents/data_mods/omnimix",
+      "target": "contents/data_mods/omnimix"
+    },
+    {
+      "type": "delete",
+      "target": "contents/data_mods/_cache"
+    }
+  ]
+}

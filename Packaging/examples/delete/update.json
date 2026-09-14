@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "operations": [
+    {
+      "type": "delete",
+      "target": "contents/update-example"
+    }
+  ]
+}

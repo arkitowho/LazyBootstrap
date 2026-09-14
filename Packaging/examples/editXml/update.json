@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "operations": [
+    {
+      "type": "editXml",
+      "target": "contents/lazy/spicetools.xml",
+      "encoding": "auto",
+      "edits": [
+        {
+          "action": "setValue",
+          "xpath": "/games/game[@name='Sound Voltex']/options/option[@name='sp2x-windowborder']/@value",
+          "value": "/ENABLED"
+        },
+        {
+          "action": "setValue",
+          "xpath": "/games/game[@name='Sound Voltex']/analogs/analog[@name='VOL-L']/@sensivity",
+          "value": "1.2"
+        }
+      ]
+    }
+  ]
+}

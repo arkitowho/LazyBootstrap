@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "operations": [
+    {
+      "type": "mirror",
+      "source": "source/assets",
+      "target": "contents/update-example"
+    }
+  ]
+}
