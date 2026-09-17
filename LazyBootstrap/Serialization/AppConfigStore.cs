@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging;
 using Tomlyn;
 using Tomlyn.Model;
 using Tomlyn.Parsing;
+using Tomlyn.Serialization;
 using LazyBootstrap.FileSystem;
 
 namespace LazyBootstrap.Serialization;
@@ -107,12 +108,9 @@ internal static class TomlTextShared
 
 internal class AppConfigStore
 {
-    private const string InvalidBackupSuffix = "invalid";
     private readonly string _path;
     private readonly object _sync = new object();
     private readonly ILogger<AppConfigStore> _logger;
-    private TomlLineDocument _readOnlyDocument;
-    private string _readOnlyReason = string.Empty;
 
     public AppConfigStore(string tomlPath, ILogger<AppConfigStore> logger)
     {
@@ -121,117 +119,14 @@ internal class AppConfigStore
         _logger = logger;
     }
 
-    public bool IsReadOnlySession
+    // Reading never creates, repairs or probes write permissions.
+    internal string ReadExistingText()
     {
-        get
-        {
-            lock (_sync)
-            {
-                return _readOnlyDocument != null;
-            }
-        }
-    }
-
-    public string ReadOnlyReason
-    {
-        get
-        {
-            lock (_sync)
-            {
-                return _readOnlyReason;
-            }
-        }
-    }
-
-    internal AppConfigHealth CheckStartupHealth()
-    {
-        lock (_sync)
-        {
-            if (!File.Exists(_path))
-            {
-                return AppConfigHealth.Missing();
-            }
-
-            if (!TryReadText(_path, out var text, out var accessError))
-            {
-                return AppConfigHealth.Inaccessible(accessError);
-            }
-
-            var validationError = ValidateTomlText(text);
-            if (!string.IsNullOrWhiteSpace(validationError))
-            {
-                return AppConfigHealth.InvalidToml(validationError, text);
-            }
-
-            if (!TryOpenConfigForSaving(_path, out var saveError))
-            {
-                return AppConfigHealth.Inaccessible(saveError, text);
-            }
-
-            string directory = Path.GetDirectoryName(_path);
-            if (string.IsNullOrWhiteSpace(directory))
-            {
-                return AppConfigHealth.Inaccessible("Config directory is empty.", text);
-            }
-
-            if (!TryProbeDirectoryWritable(directory, out var directoryError))
-            {
-                return AppConfigHealth.Inaccessible(directoryError, text);
-            }
-
-            return AppConfigHealth.Valid(text);
-        }
-    }
-
-    internal void EnterReadOnlySession(string seedText, string reason)
-    {
-        lock (_sync)
-        {
-            _readOnlyDocument = TomlLineDocument.FromText(seedText ?? string.Empty);
-            _readOnlyReason = string.IsNullOrWhiteSpace(reason)
-                ? "Config file is unavailable."
-                : reason;
-            _logger?.LogWarning("Config read-only session enabled. Reason={Reason}", _readOnlyReason);
-        }
-    }
-
-    public void ReplaceWithText(string content)
-    {
-        lock (_sync)
-        {
-            WriteTextLocked(content ?? string.Empty);
-        }
-    }
-
-    public string BackupInvalidAndReplace(string replacementContent)
-    {
-        lock (_sync)
-        {
-            if (_readOnlyDocument != null)
-            {
-                WriteTextLocked(replacementContent ?? string.Empty);
-                return string.Empty;
-            }
-
-            string backupPath = string.Empty;
-            if (File.Exists(_path))
-            {
-                backupPath = CreateUniqueBackupPath();
-                File.Move(_path, backupPath);
-                _logger?.LogWarning("Invalid config.toml was moved to {BackupPath}.", backupPath);
-            }
-
-            try
-            {
-                WriteTextLocked(replacementContent ?? string.Empty);
-                return backupPath;
-            }
-            catch
-            {
-                RestoreBackupAfterFailedReset(backupPath);
-                throw;
-            }
-        }
+        string text = File.ReadAllText(_path, Encoding.UTF8);
+        string error = ValidateTomlText(text);
+        if (!string.IsNullOrEmpty(error))
+            throw new InvalidDataException($"配置格式错误：{_path}\n{error}");
+        return text;
     }
 
     public void WriteString(string section, string key, string value)
@@ -270,6 +165,22 @@ internal class AppConfigStore
         }
     }
 
+    public void WriteSection(string section, IReadOnlyDictionary<string, string> values, params string[] removeKeys)
+    {
+        ArgumentNullException.ThrowIfNull(values);
+        lock (_sync)
+        {
+            string sectionName = NormalizeName(section);
+            var document = LoadDocumentLocked();
+            foreach (var entry in values)
+                document.UpsertString(sectionName, entry.Key, entry.Value ?? string.Empty);
+            foreach (string key in removeKeys)
+                document.RemoveKey(sectionName, key);
+            // Persist the selection and enabled flag together; failed writes leave both unchanged.
+            WriteDocumentLocked(document);
+        }
+    }
+
     public string ReadString(string section, string key, string defaultValue = "")
     {
         lock (_sync)
@@ -277,18 +188,6 @@ internal class AppConfigStore
             string sectionName = NormalizeName(section);
             string keyName = NormalizeName(key);
             if (string.IsNullOrWhiteSpace(keyName))
-            {
-                return defaultValue;
-            }
-
-            if (_readOnlyDocument != null)
-            {
-                return _readOnlyDocument.TryReadString(sectionName, keyName, out var readOnlyValue)
-                    ? readOnlyValue
-                    : defaultValue;
-            }
-
-            if (!File.Exists(_path))
             {
                 return defaultValue;
             }
@@ -344,14 +243,7 @@ internal class AppConfigStore
             bool hasPresetSection = false;
             string modelError = string.Empty;
 
-            if (_readOnlyDocument != null)
-            {
-                _readOnlyDocument.Clone().LoadServerPresetsFromText(
-                    presets,
-                    ref activePreset,
-                    ref hasPresetSection);
-            }
-            else if (File.Exists(_path) && TryLoadModelLocked(out var model, out modelError))
+            if (TryLoadModelLocked(out var model, out modelError))
             {
                 LoadServerPresetsFromModel(model, presets, ref activePreset, ref hasPresetSection);
             }
@@ -406,14 +298,7 @@ internal class AppConfigStore
 
     private TomlLineDocument LoadDocumentLocked()
     {
-        if (_readOnlyDocument != null)
-        {
-            return _readOnlyDocument.Clone();
-        }
-
-        return File.Exists(_path)
-            ? TomlLineDocument.FromLines(File.ReadAllLines(_path, Encoding.UTF8))
-            : TomlLineDocument.Empty();
+        return TomlLineDocument.FromText(ReadExistingText());
     }
 
     private void WriteDocumentLocked(TomlLineDocument document, bool preserveSectionSeparator = true)
@@ -431,15 +316,9 @@ internal class AppConfigStore
             throw new InvalidDataException($"Serialized TOML failed validation: {validationError}");
         }
 
-        if (_readOnlyDocument != null)
+        if (!SafeFileWriter.TryWriteAllText(_path, content ?? string.Empty, ValidateTomlFile, out var error, existingOnly: true))
         {
-            _readOnlyDocument = TomlLineDocument.FromText(content ?? string.Empty);
-            return;
-        }
-
-        if (!SafeFileWriter.TryWriteAllText(_path, content ?? string.Empty, ValidateTomlFile, out var error))
-        {
-            throw new IOException(error);
+            throw new IOException($"无法保存配置：{_path}\n{error}");
         }
     }
 
@@ -457,7 +336,7 @@ internal class AppConfigStore
                 return false;
             }
 
-            model = TomlSerializer.Deserialize<TomlTable>(text) ?? new TomlTable();
+            model = TomlSerializer.Deserialize(text, AppConfigTomlContext.Default.TomlTable) ?? new TomlTable();
             return true;
         }
         catch (Exception ex)
@@ -467,45 +346,7 @@ internal class AppConfigStore
         }
     }
 
-    private string CreateUniqueBackupPath()
-    {
-        var directory = Path.GetDirectoryName(_path) ?? string.Empty;
-        var fileName = Path.GetFileName(_path);
-        var timestamp = DateTime.Now.ToString("yyyyMMddHHmmss", CultureInfo.InvariantCulture);
-        string basePath = Path.Combine(directory, $"{fileName}.{InvalidBackupSuffix}.{timestamp}.bak");
-        if (!File.Exists(basePath))
-        {
-            return basePath;
-        }
-
-        for (int i = 1; ; i++)
-        {
-            string candidate = Path.Combine(directory, $"{fileName}.{InvalidBackupSuffix}.{timestamp}.{i}.bak");
-            if (!File.Exists(candidate))
-            {
-                return candidate;
-            }
-        }
-    }
-
-    private void RestoreBackupAfterFailedReset(string backupPath)
-    {
-        if (string.IsNullOrWhiteSpace(backupPath) || !File.Exists(backupPath) || File.Exists(_path))
-        {
-            return;
-        }
-
-        try
-        {
-            File.Move(backupPath, _path);
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogError(ex, "Failed to restore invalid config backup after reset failure.");
-        }
-    }
-
-    private static string ValidateTomlFile(string path)
+    internal static string ValidateTomlFile(string path)
     {
         try
         {
@@ -517,7 +358,7 @@ internal class AppConfigStore
         }
     }
 
-    private static string ValidateTomlText(string text)
+    internal static string ValidateTomlText(string text)
     {
         try
         {
@@ -527,89 +368,6 @@ internal class AppConfigStore
         catch (Exception ex)
         {
             return ex.Message;
-        }
-    }
-
-    private static bool TryReadText(string path, out string text, out string error)
-    {
-        text = string.Empty;
-        error = string.Empty;
-
-        try
-        {
-            text = File.ReadAllText(path, Encoding.UTF8);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            error = ex.Message;
-            return false;
-        }
-    }
-
-    private static bool TryOpenConfigForSaving(string path, out string error)
-    {
-        error = string.Empty;
-
-        try
-        {
-            using var stream = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            error = ex.Message;
-            return false;
-        }
-    }
-
-    private static bool TryProbeDirectoryWritable(string directory, out string error)
-    {
-        error = string.Empty;
-        string probePath = string.Empty;
-
-        try
-        {
-            Directory.CreateDirectory(directory);
-            probePath = Path.Combine(directory, $".lazybootstrap.{Guid.NewGuid():N}.tmp");
-            using (var stream = new FileStream(
-                       probePath,
-                       FileMode.CreateNew,
-                       FileAccess.Write,
-                       FileShare.None,
-                       1,
-                       FileOptions.WriteThrough))
-            {
-                stream.WriteByte(0);
-                stream.Flush(true);
-            }
-
-            return true;
-        }
-        catch (Exception ex)
-        {
-            error = ex.Message;
-            return false;
-        }
-        finally
-        {
-            DeleteProbeFile(probePath);
-        }
-    }
-
-    private static void DeleteProbeFile(string path)
-    {
-        if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
-        {
-            return;
-        }
-
-        try
-        {
-            File.Delete(path);
-        }
-        catch
-        {
         }
     }
 
@@ -801,7 +559,7 @@ internal class AppConfigStore
         return value?.Trim() ?? string.Empty;
     }
 
-    private sealed class TomlLineDocument
+    internal sealed class TomlLineDocument
     {
         private readonly List<string> _lines;
 
@@ -971,6 +729,35 @@ internal class AppConfigStore
             _lines.Add(TomlTextShared.BuildStringLine("name", preset.Name ?? string.Empty));
             _lines.Add(TomlTextShared.BuildStringLine("serverurl", preset.ServerUrl ?? string.Empty));
             _lines.Add(TomlTextShared.BuildStringLine("pcbid", preset.PcbId ?? string.Empty));
+        }
+
+        // Update one field without discarding other preset fields or comments.
+        public void UpsertServerPresetString(string presetName, string key, string value)
+        {
+            for (int start = 0; start < _lines.Count; start++)
+            {
+                if (!TryGetArraySectionName(_lines[start], out var section)
+                    || !string.Equals(section, "Server.Presets", StringComparison.OrdinalIgnoreCase)) continue;
+                int end = start + 1;
+                while (end < _lines.Count && !IsAnySectionHeader(_lines[end])) end++;
+                bool matches = false;
+                for (int i = start + 1; i < end; i++)
+                    if (TrySplitKeyValue(_lines[i], out var name, out var raw, out _)
+                        && string.Equals(name, "name", StringComparison.OrdinalIgnoreCase)
+                        && string.Equals(ParseScalarToString(raw), presetName, StringComparison.OrdinalIgnoreCase)) matches = true;
+                if (!matches) continue;
+                string line = TomlTextShared.BuildStringLine(key, value);
+                for (int i = start + 1; i < end; i++)
+                {
+                    if (!TrySplitKeyValue(_lines[i], out var name, out _, out var comment)
+                        || !string.Equals(name, key, StringComparison.OrdinalIgnoreCase)) continue;
+                    _lines[i] = AppendTrailingComment(GetIndent(_lines[i]) + line, comment);
+                    return;
+                }
+                _lines.Insert(end, line);
+                return;
+            }
+            throw new InvalidDataException($"无法定位服务器预设：{presetName}");
         }
 
         public void LoadServerPresetsFromText(
@@ -1302,7 +1089,7 @@ internal class AppConfigStore
 
             try
             {
-                var table = TomlSerializer.Deserialize<TomlTable>($"value = {rawValue}") ?? new TomlTable();
+                var table = TomlSerializer.Deserialize($"value = {rawValue}", AppConfigTomlContext.Default.TomlTable) ?? new TomlTable();
                 return table.TryGetValue("value", out var value)
                     ? ConvertTomlValue(value)
                     : string.Empty;
@@ -1396,4 +1183,9 @@ internal class AppConfigStore
                 : $"{line} {comment.TrimStart()}";
         }
     }
+}
+
+[TomlSerializable(typeof(TomlTable))]
+internal partial class AppConfigTomlContext : TomlSerializerContext
+{
 }

@@ -60,17 +60,17 @@ internal static class MediaUpdateRunner
 
     private static void StartLauncher(string game, Action<string> report)
     {
-        foreach (string relative in new[] { "启动.exe", "LazyBootstrap.exe", "Launcher.exe", "launcher/LazyBootstrap.exe" })
+        try
         {
-            string path = Path.Combine(game, relative);
-            if (!File.Exists(path)) continue;
-            try
+            string path = LauncherLocation.FindOuterLauncher(game);
+            using var process = Process.Start(new ProcessStartInfo(path)
             {
-                using var process = Process.Start(new ProcessStartInfo(path) { UseShellExecute = true, WorkingDirectory = Path.GetDirectoryName(path)! });
-                if (process != null) return;
-            }
-            catch (Exception ex) { report("无法启动启动器：" + ex.Message); }
+                UseShellExecute = true,
+                WorkingDirectory = Path.GetDirectoryName(path)!
+            });
+            if (process != null) return;
         }
+        catch (Exception ex) { report("无法启动启动器：" + ex.Message); }
         report("请从游戏根目录手动启动启动器。");
     }
 }

@@ -68,6 +68,11 @@ python Tools/generate_update_checksums.py "F:\Share\UPDATE_LAZY_KFC_example"
 
 `config.toml` 与普通文件相同，可被复制新增、覆盖、镜像清理或删除。更新包不提供 TOML 内容编辑能力；旧 `editText` 操作仍会拒绝。
 
+当前配置位置是外层 Launcher 旁边的 `config.toml`，正常部署时更新目标写为 `config.toml`，不要继续发布到 `launcher/config.toml`。Launcher 启动时会将旧位置文件复制覆盖到新位置并删除旧文件；配置缺失时创建默认值，损坏时备份修复，失败时停止启动。Launcher 默认以普通权限运行，仅新建配置被拒绝访问时提示申请管理员权限重试；其他准备失败不触发提权。主程序只读取已有配置并保存用户修改，不执行初始化，其管理员启动要求保持不变。
+
+本版本外层 Launcher、主程序和 MediaUpdater 必须成套部署。成功安装后仅从游戏根目录启动 `启动.exe` 或 `Launcher.exe`；入口缺失时提示手动启动，不直接运行子目录中的主程序。安装阶段对配置的删除仍会生效；随后 Launcher 的初始化可能创建新的默认配置，这属于启动行为。
+
+
 运行中的 `launcher/MediaUpdater.exe` 不直接替换，也不被父目录删除或镜像清理移除。复制此文件时最后写入 `.pending`，下次启动主程序时直接覆盖正式更新器，不创建 `.bak`；占用时重试，失败保留 `.pending`。禁止清单直接删除或编辑更新器，也禁止直接操作 `.pending`、`update_tmp`、`.media-update`、`updater_log.txt` 和 `.media-update-*` 内部路径。
 
 路径不允许绝对路径、根目录本身、`.`/`..` 片段、Windows 设备名、流路径、通配符、结尾点或空格。运行时不再执行链接或 Windows 短文件名专项检查。清单生成工具仍拒绝链接和非常规文件。

@@ -30,4 +30,7 @@
     <None Include="Assets\media-updater.ico" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="../LazyBootstrap/FileSystem/LauncherLocation.cs" Link="LauncherLocation.cs" />
+  </ItemGroup>
 </Project>

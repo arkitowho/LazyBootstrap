@@ -25,12 +25,20 @@ namespace LazyBootstrap
                 composition = new ApplicationComposition(AppServices.Paths);
                 App.Composition = composition;
 
-                // Configuration bootstrap/migration must run before the UI starts. AppConfigStore
-                // has no SukiUI dependency, so using it here is safe.
-                AppConfigBootstrapper.InitializeAndMigrate(
-                    AppServices.Paths.ConfigFilePath,
-                    composition.AppConfig);
-                Log.Information("Configuration initialized.");
+                try
+                {
+                    composition.AppConfig.ReadExistingText();
+                }
+                catch (Exception ex)
+                {
+                    Log.Error(ex, "Configuration could not be read.");
+                    MessageBoxW(nint.Zero,
+                        $"无法读取配置：{AppServices.Paths.ConfigFilePath}\n\n{ex.Message}\n\n请通过外层 Launcher（启动.exe）启动以准备配置。",
+                        "配置读取失败", 0x10);
+                    Environment.ExitCode = 1;
+                    return;
+                }
+                Log.Information("Configuration loaded without modification.");
 
                 BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
                 Log.Information("Avalonia lifetime ended.");

@@ -52,10 +52,11 @@ namespace LazyBootstrap.Platform
             renderMode = NormalizeRenderMode(renderMode);
             _logger.LogInformation("GPU compatibility layer toggle started. Enable={Enable}", enable);
 
-            var snapshots = CaptureAllGpuCompatLayerSnapshots(spiceXmlPath);
+            GpuCompatLayerSnapshots snapshots = null;
 
             try
             {
+                snapshots = CaptureAllGpuCompatLayerSnapshots(spiceXmlPath);
                 if (enable)
                 {
                     if (!ApplyGpuCompatLayerFiles(renderMode, out error))
@@ -72,8 +73,8 @@ namespace LazyBootstrap.Platform
                     return false;
                 }
 
-                _appConfig.WriteString(AppConfigBootstrapper.SettingSectionName, "compatlayer", enable ? "true" : "false");
-                _appConfig.WriteString(AppConfigBootstrapper.SettingSectionName, "cl-rendermode", renderMode);
+                _appConfig.WriteString(AppConfigDefaults.SettingSectionName, "compatlayer", enable ? "true" : "false");
+                _appConfig.WriteString(AppConfigDefaults.SettingSectionName, "cl-rendermode", renderMode);
 
                 if (!_spiceXmlConfigEditor.ApplySpiceOptions(spiceXmlPath, BuildDxModeUpdates(enable, renderMode), out var spiceError))
                 {
@@ -98,11 +99,12 @@ namespace LazyBootstrap.Platform
             error = string.Empty;
             renderMode = NormalizeRenderMode(renderMode);
             _logger.LogInformation("GPU compatibility layer render mode persistence started. LayerEnabled={LayerEnabled}", gpuCompatLayerEnabled);
-            var snapshots = CaptureAllGpuCompatLayerSnapshots(spiceXmlPath);
+            GpuCompatLayerSnapshots snapshots = null;
 
             try
             {
-                _appConfig.WriteString(AppConfigBootstrapper.SettingSectionName, "cl-rendermode", renderMode);
+                snapshots = CaptureAllGpuCompatLayerSnapshots(spiceXmlPath);
+                _appConfig.WriteString(AppConfigDefaults.SettingSectionName, "cl-rendermode", renderMode);
 
                 if (!gpuCompatLayerEnabled)
                 {
@@ -399,14 +401,14 @@ namespace LazyBootstrap.Platform
 
         private static string RestoreSnapshots(GpuCompatLayerSnapshots snapshots)
         {
-            return RestoreSnapshots(snapshots.Config, snapshots.Modules, snapshots.SpiceXml);
+            return snapshots == null ? string.Empty : RestoreSnapshots(snapshots.Config, snapshots.Modules, snapshots.SpiceXml);
         }
 
         private static string RestoreSnapshots(FileStateSnapshot configSnapshot, IEnumerable<FileStateSnapshot> moduleSnapshots, FileStateSnapshot spiceSnapshot)
         {
             var errors = new List<string>();
 
-            var configRestoreError = RestoreSnapshot(configSnapshot);
+            var configRestoreError = RestoreSnapshot(configSnapshot, existingConfigOnly: true);
             if (!string.IsNullOrWhiteSpace(configRestoreError))
             {
                 errors.Add($"启动器配置回滚失败: {configRestoreError}");
@@ -430,11 +432,11 @@ namespace LazyBootstrap.Platform
             return errors.Count == 0 ? string.Empty : string.Join(" ", errors);
         }
 
-        private static string RestoreSnapshot(FileStateSnapshot snapshot)
+        private static string RestoreSnapshot(FileStateSnapshot snapshot, bool existingConfigOnly = false)
         {
             try
             {
-                snapshot.Restore();
+                snapshot.Restore(existingConfigOnly);
                 return string.Empty;
             }
             catch (Exception ex)
@@ -459,56 +461,4 @@ namespace LazyBootstrap.Platform
         }
     }
 
-    internal sealed class FileStateSnapshot
-    {
-        private readonly byte[] _content;
-
-        private FileStateSnapshot(string path, bool existed, byte[] content)
-        {
-            Path = path;
-            Existed = existed;
-            _content = content ?? Array.Empty<byte>();
-        }
-
-        public string Path { get; }
-
-        public bool Existed { get; }
-
-        public static FileStateSnapshot Capture(string path)
-        {
-            ArgumentException.ThrowIfNullOrWhiteSpace(path);
-
-            string fullPath = System.IO.Path.GetFullPath(path);
-            if (!File.Exists(fullPath))
-            {
-                return new FileStateSnapshot(fullPath, false, Array.Empty<byte>());
-            }
-
-            return new FileStateSnapshot(fullPath, true, File.ReadAllBytes(fullPath));
-        }
-
-        public void Restore()
-        {
-            if (Existed)
-            {
-                string directory = System.IO.Path.GetDirectoryName(Path);
-                if (!string.IsNullOrWhiteSpace(directory))
-                {
-                    Directory.CreateDirectory(directory);
-                }
-
-                if (!SafeFileWriter.TryWriteAllBytes(Path, _content, null, out var error))
-                {
-                    throw new IOException(error);
-                }
-
-                return;
-            }
-
-            if (File.Exists(Path))
-            {
-                File.Delete(Path);
-            }
-        }
-    }
 }

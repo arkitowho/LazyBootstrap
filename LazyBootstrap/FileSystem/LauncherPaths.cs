@@ -6,8 +6,6 @@ namespace LazyBootstrap.FileSystem
 
     internal sealed class LauncherPaths
     {
-        private const string BaseDirArgumentName = "--basedir";
-        private const string BaseDirEnvironmentVariable = "LAZYBOOTSTRAP_BASEDIR";
         private readonly string _defaultContentsDirectoryPath;
         private readonly string _defaultAsphyxiaDirectoryPath;
 
@@ -27,11 +25,11 @@ namespace LazyBootstrap.FileSystem
         public static LauncherPaths Create(string[] args)
         {
             string applicationDirectoryPath = PathHelper.NormalizePath(AppDomain.CurrentDomain.BaseDirectory);
-            string baseDirectoryPath = ResolveBaseDirectory(
+            string baseDirectoryPath = LauncherLocation.ResolveBaseDirectory(
                 args,
-                SystemEnvironment.GetEnvironmentVariable(BaseDirEnvironmentVariable),
+                SystemEnvironment.GetEnvironmentVariable(LauncherLocation.BaseDirEnvironmentVariable),
                 applicationDirectoryPath);
-            string configFilePath = PathHelper.NormalizePath(Path.Combine(applicationDirectoryPath, "config.toml"));
+            string configFilePath = PathHelper.NormalizePath(Path.Combine(LauncherLocation.GetConfigurationDirectory(applicationDirectoryPath), "config.toml"));
             return new LauncherPaths(baseDirectoryPath, applicationDirectoryPath, configFilePath);
         }
 
@@ -92,6 +90,11 @@ namespace LazyBootstrap.FileSystem
             return Path.Combine(BaseDir, "launcher", "LazyBootstrap.exe");
         }
 
+        public string GetOuterLauncherExecutablePath()
+        {
+            return LauncherLocation.FindOuterLauncher(Path.GetDirectoryName(ConfigFilePath));
+        }
+
         public string GetRuntimeDirectoryPath()
         {
             return Path.Combine(BaseDir, "runtime");
@@ -122,72 +125,6 @@ namespace LazyBootstrap.FileSystem
             }
 
             return Path.Combine(BaseDir, "launcher", "7za.exe");
-        }
-
-        private static string ResolveBaseDirectory(
-            string[] args,
-            string environmentBaseDirectory,
-            string applicationDirectoryPath)
-        {
-            string argumentBaseDirectory = TryGetBaseDirectoryFromArguments(args);
-            if (!string.IsNullOrWhiteSpace(argumentBaseDirectory))
-            {
-                return PathHelper.NormalizePath(argumentBaseDirectory);
-            }
-
-            if (!string.IsNullOrWhiteSpace(environmentBaseDirectory))
-            {
-                return PathHelper.NormalizePath(environmentBaseDirectory);
-            }
-
-            string normalizedApplicationDirectory = PathHelper.NormalizePath(applicationDirectoryPath);
-            if (string.IsNullOrWhiteSpace(normalizedApplicationDirectory))
-            {
-                return string.Empty;
-            }
-
-            string trimmedApplicationDirectory = normalizedApplicationDirectory.TrimEnd(
-                Path.DirectorySeparatorChar,
-                Path.AltDirectorySeparatorChar);
-            var applicationDirectoryInfo = new DirectoryInfo(trimmedApplicationDirectory);
-            if (!string.Equals(applicationDirectoryInfo.Name, "launcher", StringComparison.OrdinalIgnoreCase)
-                || applicationDirectoryInfo.Parent == null
-                || !Directory.Exists(Path.Combine(trimmedApplicationDirectory, "Libs")))
-            {
-                return normalizedApplicationDirectory;
-            }
-
-            return PathHelper.NormalizePath(applicationDirectoryInfo.Parent.FullName);
-        }
-
-        private static string TryGetBaseDirectoryFromArguments(string[] args)
-        {
-            if (args == null)
-            {
-                return string.Empty;
-            }
-
-            for (var index = 0; index < args.Length; index++)
-            {
-                string argument = args[index];
-                if (string.IsNullOrWhiteSpace(argument))
-                {
-                    continue;
-                }
-
-                if (argument.StartsWith($"{BaseDirArgumentName}=", StringComparison.OrdinalIgnoreCase))
-                {
-                    return argument.Substring(BaseDirArgumentName.Length + 1).Trim('"');
-                }
-
-                if (string.Equals(argument, BaseDirArgumentName, StringComparison.OrdinalIgnoreCase)
-                    && index + 1 < args.Length)
-                {
-                    return (args[index + 1] ?? string.Empty).Trim('"');
-                }
-            }
-
-            return string.Empty;
         }
 
     }

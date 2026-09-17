@@ -17,7 +17,6 @@ namespace LazyBootstrap.Application
     {
         private static bool _serilogInitialized;
         private static bool _globalExceptionLoggingRegistered;
-        private static LegacyConfigMigrationResult _legacyConfigMigrationResult = LegacyConfigMigrationResult.NotRequired();
         private const string LogOutputTemplate = "[{Timestamp:yyyy-MM-dd HH:mm:ss.fff} {Level:u3}] [{ProcessId}] [{SourceContext}] {Message:lj}{NewLine}{Exception}";
 
         public static LauncherPaths Paths { get; private set; }
@@ -48,7 +47,6 @@ namespace LazyBootstrap.Application
             RegisterGlobalExceptionLogging();
             _serilogInitialized = true;
 
-            LogLegacyConfigMigrationResult();
             Log.Information(
                 "Serilog initialized. Version={Version}, ProcessId={ProcessId}, BaseDir={BaseDirectory}, ApplicationDir={ApplicationDirectory}, ConfigPath={ConfigPath}, LogPath={LogPath}",
                 applicationVersion,
@@ -76,56 +74,6 @@ namespace LazyBootstrap.Application
             if (Paths != null) return;
 
             Paths = LauncherPaths.Create(args);
-            string legacyConfigFilePath = PathHelper.NormalizePath(Path.Combine(Paths.BaseDir, "config.toml"));
-            _legacyConfigMigrationResult = MigrateLegacyConfig(legacyConfigFilePath, Paths.ConfigFilePath);
-        }
-
-        private static LegacyConfigMigrationResult MigrateLegacyConfig(string legacyConfigFilePath, string configFilePath)
-        {
-            if (string.IsNullOrWhiteSpace(legacyConfigFilePath)
-                || string.IsNullOrWhiteSpace(configFilePath)
-                || string.Equals(legacyConfigFilePath, configFilePath, StringComparison.OrdinalIgnoreCase)
-                || !File.Exists(legacyConfigFilePath))
-            {
-                return LegacyConfigMigrationResult.NotRequired();
-            }
-
-            try
-            {
-                string configDirectoryPath = Path.GetDirectoryName(configFilePath);
-                if (!string.IsNullOrWhiteSpace(configDirectoryPath))
-                {
-                    Directory.CreateDirectory(configDirectoryPath);
-                }
-
-                File.Move(legacyConfigFilePath, configFilePath, true);
-                return LegacyConfigMigrationResult.Migrated(legacyConfigFilePath, configFilePath);
-            }
-            catch (Exception ex)
-            {
-                return LegacyConfigMigrationResult.Failed(legacyConfigFilePath, configFilePath, ex.Message);
-            }
-        }
-
-        private static void LogLegacyConfigMigrationResult()
-        {
-            if (_legacyConfigMigrationResult.Status == LegacyConfigMigrationStatus.Migrated)
-            {
-                Log.Information(
-                    "Legacy config.toml migrated to launcher directory. SourcePath={SourcePath}, DestinationPath={DestinationPath}",
-                    _legacyConfigMigrationResult.SourcePath,
-                    _legacyConfigMigrationResult.DestinationPath);
-                return;
-            }
-
-            if (_legacyConfigMigrationResult.Status == LegacyConfigMigrationStatus.Failed)
-            {
-                Log.Warning(
-                    "Legacy config.toml migration failed. SourcePath={SourcePath}, DestinationPath={DestinationPath}, Error={Error}",
-                    _legacyConfigMigrationResult.SourcePath,
-                    _legacyConfigMigrationResult.DestinationPath,
-                    _legacyConfigMigrationResult.Error);
-            }
         }
 
         public static void Dispose()
@@ -173,33 +121,5 @@ namespace LazyBootstrap.Application
             }
         }
 
-        private enum LegacyConfigMigrationStatus
-        {
-            NotRequired,
-            Migrated,
-            Failed
-        }
-
-        private readonly record struct LegacyConfigMigrationResult(
-            LegacyConfigMigrationStatus Status,
-            string SourcePath,
-            string DestinationPath,
-            string Error)
-        {
-            public static LegacyConfigMigrationResult NotRequired()
-            {
-                return new LegacyConfigMigrationResult(LegacyConfigMigrationStatus.NotRequired, string.Empty, string.Empty, string.Empty);
-            }
-
-            public static LegacyConfigMigrationResult Migrated(string sourcePath, string destinationPath)
-            {
-                return new LegacyConfigMigrationResult(LegacyConfigMigrationStatus.Migrated, sourcePath, destinationPath, string.Empty);
-            }
-
-            public static LegacyConfigMigrationResult Failed(string sourcePath, string destinationPath, string error)
-            {
-                return new LegacyConfigMigrationResult(LegacyConfigMigrationStatus.Failed, sourcePath, destinationPath, error ?? string.Empty);
-            }
-        }
     }
 }

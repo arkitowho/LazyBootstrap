@@ -176,7 +176,7 @@ internal static partial class UpdateRegression
             var (game, package) = Pack(root, Copy("source/a", path)); Put(package, "source/a", "new"); Seal(package);
             Reject(() => Apply(game, package)); CheckNoTransaction(game);
         });
-        RunChecksumTests(); RunXmlTests(); RunProcessTests();
+        RunChecksumTests(); RunXmlTests(); RunProcessTests(); RunConfigTests();
         return _failed;
     }
 
@@ -200,7 +200,12 @@ internal static partial class UpdateRegression
             if (_entry is DirectoryInfo dir) dir.SetAccessControl((DirectorySecurity)security);
             else ((FileInfo)_entry).SetAccessControl((FileSecurity)security);
         }
-        public void Dispose() => Set(_original);
+        public void Dispose()
+        {
+            var restored = Get();
+            restored.SetSecurityDescriptorBinaryForm(_original.GetSecurityDescriptorBinaryForm(), AccessControlSections.Access);
+            Set(restored);
+        }
     }
 
     private static void Test(string name, Action<string> test)

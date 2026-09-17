@@ -12,6 +12,18 @@ internal static class Program
 {
     private static int Main(string[] args)
     {
+        if (args.Contains("--launcher-smoke-child"))
+        {
+            string marker = args[Array.IndexOf(args, "--launcher-smoke-child") + 1];
+            var paths = LauncherPaths.Create(args);
+            var store = new LazyBootstrap.Serialization.AppConfigStore(paths.ConfigFilePath, null);
+            store.ReadExistingText();
+            using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+            bool elevated = new System.Security.Principal.WindowsPrincipal(identity).IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
+            File.WriteAllLines(marker, new[] { paths.ConfigFilePath, paths.BaseDir,
+                store.ReadString("Setting", "noasphyxia"), elevated.ToString() });
+            return 0;
+        }
         if (args.Length > 0) return UpdateRegression.Worker(args);
         int failed = 0;
         Run("同目录迁移保留存档", root =>
