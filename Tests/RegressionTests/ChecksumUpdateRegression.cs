@@ -14,7 +14,7 @@ internal static partial class UpdateRegression
     {
         var manifest = new MediaUpdateChecksumManifest
         {
-            SchemaVersion = 1, Algorithm = "SHA256", Files = Directory.GetFiles(package, "*", SearchOption.AllDirectories)
+            Algorithm = "SHA256", Files = Directory.GetFiles(package, "*", SearchOption.AllDirectories)
                 .Where(p => !MediaUpdateSecurity.Same(Path.GetRelativePath(package, p), MediaUpdateChecksums.FileName))
                 .OrderBy(p => p, StringComparer.Ordinal).Select(p => new MediaUpdateChecksumFile
                 {
@@ -38,10 +38,32 @@ internal static partial class UpdateRegression
 
     private static void RunChecksumTests()
     {
+        Test("无扩展名清单不含版本字段并拒绝旧格式", root =>
+        {
+            var (game, staging) = Pack(root, Delete("contents/old")); Put(game, "contents/old", "old");
+            Seal(staging);
+            string updatePath = Path.Combine(staging, "update");
+            string checksumPath = Path.Combine(staging, "checksums");
+            string update = File.ReadAllText(updatePath);
+            Check(!update.Contains("schemaVersion") && !File.ReadAllText(checksumPath).Contains("schemaVersion"), "清单仍包含版本字段");
+            File.Move(updatePath, updatePath + ".json");
+            RejectChecksum(() => Apply(game, staging), "一份 update");
+            File.Move(updatePath + ".json", updatePath);
+            File.Move(checksumPath, checksumPath + ".json");
+            RejectChecksum(() => Apply(game, staging), "缺少校验清单");
+            File.Move(checksumPath + ".json", checksumPath);
+            File.WriteAllText(updatePath, update.Replace("\"operations\":", "\"schemaVersion\": 1, \"operations\":"));
+            Seal(staging);
+            RejectChecksum(() => Apply(game, staging), "schemaVersion");
+            Equal(game, "contents/old", "old");
+            File.WriteAllText(updatePath, update); Seal(staging);
+            Apply(game, staging);
+            Check(!File.Exists(Path.Combine(game, "contents/old")), "无扩展名清单未执行");
+        });
         Test("缺失校验清单拒绝且不修改游戏", root =>
         {
             var (game, staging) = Pack(root, Delete("contents/old")); Put(game, "contents/old", "old");
-            RejectChecksum(() => Apply(game, staging), "checksums.json"); Equal(game, "contents/old", "old");
+            RejectChecksum(() => Apply(game, staging), "checksums"); Equal(game, "contents/old", "old");
         });
         Test("SHA256 已知摘要、中文路径、空文件和大文件", root =>
         {
@@ -59,7 +81,7 @@ internal static partial class UpdateRegression
             Check(new FileInfo(Path.Combine(game, "contents/files/large")).Length == 3 * 1024 * 1024 + 17, "大文件长度错误");
             Check(messages.Any(m => m.Contains("正在校验更新包 4/4")), "缺少文件校验进度");
         });
-        foreach (string tampered in new[] { "update.json", "source/file", "说明.txt" })
+        foreach (string tampered in new[] { "update", "source/file", "说明.txt" })
         Test("拒绝文件摘要不符：" + tampered, root =>
         {
             var (game, staging) = Pack(root, Copy("source/file", "contents/file"));
@@ -84,20 +106,20 @@ internal static partial class UpdateRegression
             var model = JsonSerializer.Deserialize(good, MediaUpdateJsonContext.Default.MediaUpdateChecksumManifest)!;
             foreach (string invalid in new[]
             {
-                "{}", "null", good.Replace("SHA256", "MD5"), good.Replace("\"schemaVersion\": 1", "\"schemaVersion\": 2"),
-                good.Replace("\"schemaVersion\": 1", "\"schemaVersion\": 1, \"schemaVersion\": 1"),
+                "{}", "null", good.Replace("SHA256", "MD5"), good.Replace("\"algorithm\":", "\"schemaVersion\": 1, \"algorithm\":"),
+                good.Replace("\"algorithm\":", "\"algorithm\": \"SHA256\", \"algorithm\":"),
                 good.Replace("\"algorithm\":", "\"unknown\": 1, \"algorithm\":"),
                 good.Replace("\"SHA256\"", "null"), good.Replace("\"files\": [", "\"files\": [null,"),
                 good.Replace(model.Files[0].Sha256, "ABC"), good.Replace(model.Files[0].Sha256, new string('A', 64)),
-                good.Replace("\"path\":", "\"extra\": true, \"path\":"), good.Replace("\"path\": \"update.json\",", ""),
-                good.Replace("update.json", "../outside"), good.Replace("update.json", "C:/outside"),
-                good.Replace("update.json", "source/a:stream"), good.Replace("update.json", "source/CON.txt"),
-                good.Replace("update.json", "checksums.json"), good.Replace("update.json", "source\\\\file")
+                good.Replace("\"path\":", "\"extra\": true, \"path\":"), good.Replace("\"path\": \"update\",", ""),
+                good.Replace("update", "../outside"), good.Replace("update", "C:/outside"),
+                good.Replace("update", "source/a:stream"), good.Replace("update", "source/CON.txt"),
+                good.Replace("update", "checksums"), good.Replace("update", "source\\\\file")
             })
             {
                 File.WriteAllText(path, invalid); RejectChecksum(() => Apply(game, staging), "疑似");
             }
-            model.Files.Add(new MediaUpdateChecksumFile { Path = "UPDATE.JSON", Sha256 = model.Files[0].Sha256 });
+            model.Files.Add(new MediaUpdateChecksumFile { Path = "UPDATE", Sha256 = model.Files[0].Sha256 });
             File.WriteAllText(path, JsonSerializer.Serialize(model, MediaUpdateJsonContext.Default.MediaUpdateChecksumManifest));
             RejectChecksum(() => Apply(game, staging), "大小写冲突"); Equal(game, "contents/old", "old");
         });
@@ -105,13 +127,13 @@ internal static partial class UpdateRegression
         {
             var (game, staging) = Pack(root, Delete("contents/old"));
             string wrapper = Path.Combine(staging, "wrapper"); Directory.CreateDirectory(wrapper);
-            File.Move(Path.Combine(staging, "update.json"), Path.Combine(wrapper, "update.json"));
-            Put(wrapper, "source/checksums.json", "payload"); Seal(wrapper);
+            File.Move(Path.Combine(staging, "update"), Path.Combine(wrapper, "update"));
+            Put(wrapper, "source/checksums", "payload"); Seal(wrapper);
             Put(staging, "extra.txt", "unchecked"); RejectChecksum(() => Apply(game, staging), "extra.txt");
             File.Delete(Path.Combine(staging, "extra.txt"));
             Apply(game, staging);
-            File.AppendAllText(Path.Combine(wrapper, "source/checksums.json"), "changed");
-            RejectChecksum(() => Apply(game, staging), "source/checksums.json");
+            File.AppendAllText(Path.Combine(wrapper, "source/checksums"), "changed");
+            RejectChecksum(() => Apply(game, staging), "source/checksums");
         });
         Test("校验可取消且不创建事务", root =>
         {

@@ -5,7 +5,7 @@ namespace LazyBootstrap.MediaUpdate
 {
     internal static class MediaUpdateProtocol
     {
-        public const string ManifestFileName = "update.json";
+        public const string ManifestFileName = "update";
         public const string UpdateStateFolderName = ".media-update";
         public const string UpdateStagingFolderName = "update_tmp";
         public const string UpdateLogFileName = "updater_log.txt";

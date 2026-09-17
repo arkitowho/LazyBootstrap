@@ -31,8 +31,7 @@ class ChecksumToolTests(unittest.TestCase):
 
     @staticmethod
     def write_manifest(package, operations):
-        (package / "update.json").write_text(json.dumps({"schemaVersion": 1,
-                                                        "operations": operations}), encoding="utf-8")
+        (package / "update").write_text(json.dumps({"operations": operations}), encoding="utf-8")
 
     def generate(self, package=None):
         with contextlib.redirect_stdout(io.StringIO()):
@@ -68,16 +67,18 @@ class ChecksumToolTests(unittest.TestCase):
         (folder / "empty").write_bytes(b"")
         (folder / "large").write_bytes(bytes(range(256)) * 20000)
         (self.package / ".hidden").write_bytes(b"hidden")
-        (folder / "checksums.json").write_bytes(b"nested-payload")
+        (folder / "checksums").write_bytes(b"nested-payload")
         output = self.generate()
         before = output.read_bytes()
         self.assertFalse(before.startswith(b"\xef\xbb\xbf"))
         document = json.loads(before)
         self.assertEqual(document["algorithm"], "SHA256")
+        self.assertNotIn("schemaVersion", document)
         paths = [entry["path"] for entry in document["files"]]
         self.assertEqual(paths, sorted(paths))
-        self.assertNotIn("checksums.json", paths)
-        self.assertIn("source/中文 日本/checksums.json", paths)
+        self.assertNotIn("checksums", paths)
+        self.assertIn("update", paths)
+        self.assertIn("source/中文 日本/checksums", paths)
         self.assertIn(".hidden", paths)
         for entry in document["files"]:
             self.assertEqual(entry["sha256"], hashlib.sha256((self.package / entry["path"]).read_bytes()).hexdigest())
@@ -86,24 +87,30 @@ class ChecksumToolTests(unittest.TestCase):
 
     def test_wrapper_and_only_delete_package(self):
         output = self.generate(self.root)
-        self.assertEqual(output, self.package / "checksums.json")
+        self.assertEqual(output, self.package / "checksums")
         self.assertEqual(len(json.loads(output.read_bytes())["files"]), 1)
 
     def test_missing_or_multiple_manifests(self):
-        (self.package / "update.json").unlink()
+        (self.package / "update").unlink()
         with self.assertRaises(ValueError):
             self.generate()
-        (self.package / "update.json").write_text("{}")
+        (self.package / "update").write_text("{}")
         (self.package / "nested").mkdir()
-        (self.package / "nested" / "UPDATE.JSON").write_text("{}")
+        (self.package / "nested" / "UPDATE").write_text("{}")
         with self.assertRaises(ValueError):
             self.generate()
+
+    def test_old_manifest_name_is_not_recognized(self):
+        (self.package / "update").rename(self.package / "update.json")
+        with self.assertRaisesRegex(ValueError, "一份 update"):
+            self.generate()
+        self.assertFalse((self.package / "checksums").exists())
 
     def test_file_outside_package_rejected(self):
         (self.root / "outside.txt").write_text("outside")
         with self.assertRaises(ValueError):
             self.generate(self.root)
-        self.assertFalse((self.package / "checksums.json").exists())
+        self.assertFalse((self.package / "checksums").exists())
 
     def test_invalid_windows_paths(self):
         for path in ("../outside", "C:/outside", "/root", "a//b", "a/./b", "a\\b", "source/CON.txt",
@@ -166,7 +173,7 @@ class ChecksumToolTests(unittest.TestCase):
     def test_cli_exit_status(self):
         result = self.run_process([sys.executable, REPO / "Tools/generate_update_checksums.py", self.package])
         self.assertEqual(result.returncode, 0, result.stdout)
-        (self.package / "update.json").unlink()
+        (self.package / "update").unlink()
         result = self.run_process([sys.executable, REPO / "Tools/generate_update_checksums.py", self.package])
         self.assertNotEqual(result.returncode, 0)
 
@@ -217,7 +224,12 @@ class ChecksumToolTests(unittest.TestCase):
         for kind in ("copy", "mirror", "editXml", "delete"):
             with self.subTest(kind=kind):
                 with zipfile.ZipFile(output / f"UPDATE_LAZY_KFC_example_{kind}.zip") as archive:
-                    self.assertIn("checksums.json", archive.namelist())
+                    self.assertIn("checksums", archive.namelist())
+                    self.assertIn("update", archive.namelist())
+                    self.assertNotIn("update.json", archive.namelist())
+                    self.assertNotIn("checksums.json", archive.namelist())
+                    for name in ("update", "checksums"):
+                        self.assertNotIn("schemaVersion", json.loads(archive.read(name)))
                     archive.extractall(staging)
                 # Test the unmodified release binary without elevation, against this test-owned directory only.
                 # This does not test UAC presentation or grant the child any additional permissions.
@@ -226,7 +238,7 @@ class ChecksumToolTests(unittest.TestCase):
                 result = self.run_process([updater, "--game", game, "--package", package,
                                            "--parent-pid", self.last_launcher_pid], environment=environment)
                 self.assertEqual(result.returncode, 0, result.stdout)
-                self.assertIn("更新成功".encode("utf-8"), result.stdout)
+                self.assertIn(b"Update Successful!", result.stdout)
                 self.assertFalse(staging.exists())
                 self.assertFalse((game / ".media-update/verified-package.json").exists())
                 self.assertTrue((game / ".media-update/updater_log.txt").is_file())

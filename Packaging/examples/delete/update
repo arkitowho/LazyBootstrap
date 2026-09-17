@@ -1,9 +1,7 @@
 {
-  "schemaVersion": 1,
   "operations": [
     {
-      "type": "copy",
-      "source": "source/assets",
+      "type": "delete",
       "target": "contents/update-example"
     }
   ]

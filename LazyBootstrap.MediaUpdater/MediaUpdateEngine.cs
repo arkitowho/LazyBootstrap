@@ -131,6 +131,7 @@ internal sealed class MediaUpdateEngine : IDisposable
                         break;
                 }
                 Report($"正在安装 {i + 1}/{_changes.Count}：{current}");
+                cancel.ThrowIfCancellationRequested();
             }
             Report("更新安装完成。");
         }

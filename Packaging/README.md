@@ -6,47 +6,48 @@
 
 ```text
 UPDATE_LAZY_KFC_20260908.zip
-├── update.json
-├── checksums.json
+├── update
+├── checksums
 └── source/
     ├── contents/
     └── launcher/
 ```
 
-整个解压目录必须只有一份 `update.json`，可以有外层包装目录，但所有文件都必须位于 `update.json` 所在目录内；不要在外层放置额外说明文件。源路径相对于清单所在目录且必须位于 `source/`；目标路径相对于游戏根目录。仅删除或编辑 XML 的包可以没有 `source/`，但仍必须有 `checksums.json`。
+整个解压目录必须只有一份 `update`，可以有外层包装目录，但所有文件都必须位于 `update` 所在目录内；不要在外层放置额外说明文件。源路径相对于清单所在目录且必须位于 `source/`；目标路径相对于游戏根目录。仅删除或编辑 XML 的包可以没有 `source/`，但仍必须有 `checksums`。
 
-参考 [清单模板](update.json) 与 [JSON Schema](update.schema.json)。模板中的所有源目录必须实际存在；不发布某部分时删除对应操作。Schema 提供编辑器校验；程序检查基础路径约束，并在预演中检查实际文件、操作冲突与访问权限。
+参考 [清单模板](update) 与 [JSON Schema](update.schema.json)。模板中的所有源目录必须实际存在；不发布某部分时删除对应操作。Schema 提供编辑器校验；程序检查基础路径约束，并在预演中检查实际文件、操作冲突与访问权限。
 
-清单使用严格 JSON，不支持注释、尾逗号、重复字段、未知字段或 null。`schemaVersion` 固定为 `1`，`operations` 至少一项。同一个包或修改过内容的包均可安装，每次都会重新校验，并根据游戏目录的当前状态预演和安装。修改包内容后必须重新生成 `checksums.json`。
+旧包需将 `update.json` 重命名为 `update`、移除清单中的 `schemaVersion`、删除旧 `checksums.json`，再运行生成工具生成 `checksums` 并重新打包。旧文件名和版本字段不再作为清单格式接受；编辑器使用的 `.schema.json` 文件名保持不变。
+
+`update` 和 `checksums` 均不带扩展名，内容仍为 UTF-8 严格 JSON，不支持注释、尾逗号、重复字段、未知字段或 null。两份清单均不包含 `schemaVersion`；`update` 的 `operations` 至少一项。同一个包或修改过内容的包均可安装，每次都会重新校验，并根据游戏目录的当前状态预演和安装。修改包内容后必须重新生成 `checksums`。
 
 重复安装也会重新执行 XML 编辑：插入操作可能再次插入，新增已存在的属性或删除已不存在的 XML 节点会校验失败。需要支持反复执行的配置调整时，优先使用修改已有值的 `setValue`，并确保每次操作的 XPath 都满足唯一匹配要求。预演失败不安装；安装失败或中断会保留已经完成的修改，不回滚。
 
 ## 生成 SHA-256 校验清单
 
-准备好 `update.json`、全部载荷和说明文件后，在仓库根目录运行（需要 Python 3.10 或更新版本，无第三方依赖）：
+准备好 `update`、全部载荷和说明文件后，在仓库根目录运行（需要 Python 3.10 或更新版本，无第三方依赖）：
 
 ```text
 python Tools/generate_update_checksums.py "F:\Share\UPDATE_LAZY_KFC_example"
 ```
 
-工具自动定位唯一的 `update.json`，在其同级写入 `checksums.json`。生成后将整个包目录打成压缩包，无需手动填写摘要。修改任何文件后都必须重新生成，再重新打包；已有清单只有在计算全部成功后才被替换。重复生成相同内容会得到相同清单。
+工具自动定位唯一的 `update`，在其同级写入 `checksums`。生成后将整个包目录打成压缩包，无需手动填写摘要。修改任何文件后都必须重新生成，再重新打包；已有清单只有在计算全部成功后才被替换。重复生成相同内容会得到相同清单。
 
 校验清单采用 UTF-8 严格 JSON，格式由 [checksums.schema.json](checksums.schema.json) 定义。以下仅为格式示意，实际摘要由工具生成：
 
 ```json
 {
-  "schemaVersion": 1,
   "algorithm": "SHA256",
   "files": [
     {
-      "path": "update.json",
+      "path": "update",
       "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
     }
   ]
 }
 ```
 
-- 所有文件都参与校验，包括 `update.json`、说明文件、隐藏文件和未被操作引用的载荷；仅排除包根目录的 `checksums.json` 自身。子目录中的同名文件仍参与校验。空目录不计算摘要。
+- 所有文件都参与校验，包括 `update`、说明文件、隐藏文件和未被操作引用的载荷；仅排除包根目录的 `checksums` 自身。子目录中的同名文件仍参与校验。空目录不计算摘要。
 - 路径相对于包根目录，以 `/` 分隔；SHA-256 为 64 位小写十六进制。拒绝重复字段、未知字段、null、重复路径、大小写冲突和非法路径。
 - 解压后的文件集合必须和清单完全一致。缺少文件、额外文件、摘要不符或缺少清单都会停止更新，提示“更新包疑似被修改或损坏”及具体原因。
 - 启动器解压后收集一次文件列表，核对清单中的全部文件 SHA-256；不计算额外整包摘要，不生成校验交接记录。
@@ -120,11 +121,10 @@ python Tools/generate_update_checksums.py "F:\Share\UPDATE_LAZY_KFC_example"
 
 ### 可直接打包的修改示例
 
-下面是完整 `update.json`，对应 [editXml 示例清单](examples/editXml/update.json)。它将 `sp2x-windowborder` 的 `value` 改为 `/ENABLED`，并将左旋钮 `sensivity` 改为 `1.2`。这些是展示写法的值，发布时按实际需求调整。
+下面是完整 `update`，对应 [editXml 示例清单](examples/editXml/update)。它将 `sp2x-windowborder` 的 `value` 改为 `/ENABLED`，并将左旋钮 `sensivity` 改为 `1.2`。这些是展示写法的值，发布时按实际需求调整。
 
 ```json
 {
-  "schemaVersion": 1,
   "operations": [
     {
       "type": "editXml",
@@ -147,7 +147,7 @@ python Tools/generate_update_checksums.py "F:\Share\UPDATE_LAZY_KFC_example"
 }
 ```
 
-这个包只需要 `update.json`，无需 `source/`。两处目标及其属性必须已经存在；预演失败时不会留下部分修改。其他游戏和未声明修改的节点保留，序列化可能调整等价排版。
+这个包只需要 `update` 和 `checksums`，无需 `source/`。两处目标及其属性必须已经存在；预演失败时不会留下部分修改。其他游戏和未声明修改的节点保留，序列化可能调整等价排版。
 
 ### 新增参数：addAttribute
 
@@ -246,7 +246,7 @@ XML 中的一“行”是一个元素，不依赖它显示在哪一行。假设�
 - 保留原编码、BOM、XML 声明是否存在、注释、无关节点及末尾是否换行。新增元素沿用相邻缩进和文件换行风格，没有参考时使用四个空格与 CRLF。混合文本及 `xml:space='preserve'` 内容不会自动插入格式空白。
 - XML 序列化可能改变等价的引号、实体、空元素写法或编码名称，不保证逐字节保留排版。安装后不保留原始字节备份。
 - 文件与片段均禁用 DTD 和外部实体解析。全部 XML 修改先在内存中预演，最终序列化结果再次进行 XML 校验后才交给安装阶段直接写入。
-- 清单版本仍为 `1`。新的 `editXml` 包需要支持此动作的 MediaUpdater，旧 `editText` 包不再支持。
+- `editXml` 包需要支持此动作的 MediaUpdater，旧 `editText` 包不再支持。
 
 ## 四阶段更新流程
 
@@ -265,7 +265,7 @@ XML 中的一“行”是一个元素，不依赖它显示在哪一行。假设�
 
 没有备份、载荷暂存副本、事务锁、交接摘要、进度持久化、回滚或启动恢复。预演只反映检查当时的状态；句柄检查后即释放。安装中出现新的占用、权限变化、空间不足或断电，可能留下部分更新，后续启动不会自动恢复或拦截。默认一次只执行一个更新，不协调并发更新。
 
-预演阶段可取消且不安装；安装阶段的 Ctrl+C 在当前文件操作结束后停止，不撤销已完成的修改。失败提示具体文件，保留解压内容和日志，不自动重新启动启动器。成功后立即尝试重新启动，无固定等待；解压清理失败仅提示，不改变安装结果。
+更新各步骤不添加固定停顿。预演阶段可取消且不安装；安装阶段的 Ctrl+C 在当前文件操作结束后停止，不撤销已完成的修改。失败提示具体文件，保留解压内容和日志，不自动重新启动启动器。成功后显示绿色 `Update Successful!`，停留 5 秒再尝试重新启动；解压清理失败仅提示，不改变安装结果。
 
 内部调用形式如下，`--parent-pid` 必须是发起更新的启动器进程 ID：
 

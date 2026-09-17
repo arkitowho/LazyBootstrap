@@ -37,7 +37,7 @@ internal static class Program
             Console.CancelKeyPress += handler;
             try
             {
-                int result = await MediaUpdateRunner.RunAsync(Path.GetFullPath(game), Path.GetFullPath(package), parentPid, Console.WriteLine, cancel.Token);
+                int result = await MediaUpdateRunner.RunAsync(Path.GetFullPath(game), Path.GetFullPath(package), parentPid, ReportProgress, cancel.Token);
                 if (result != 0 && !Console.IsInputRedirected)
                 {
                     Console.WriteLine("按回车关闭此窗口。");
@@ -48,5 +48,21 @@ internal static class Program
             finally { Console.CancelKeyPress -= handler; }
         }
         catch (Exception ex) { Console.Error.WriteLine(ex.Message); return 2; }
+    }
+
+    private static void ReportProgress(string message)
+    {
+        if (message != MediaUpdateRunner.SuccessMessage || Console.IsOutputRedirected)
+        {
+            Console.WriteLine(message);
+            return;
+        }
+        var previousColor = Console.ForegroundColor;
+        try
+        {
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine(message);
+        }
+        finally { Console.ForegroundColor = previousColor; }
     }
 }

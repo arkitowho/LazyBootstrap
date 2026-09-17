@@ -9,6 +9,8 @@ namespace LazyBootstrap.MediaUpdate;
 
 internal static class MediaUpdateRunner
 {
+    internal const string SuccessMessage = "Update Successful!";
+
     public static async Task<int> RunAsync(string game, string package, int parentPid, Action<string> report,
         CancellationToken cancel = default)
     {
@@ -29,12 +31,16 @@ internal static class MediaUpdateRunner
             }, cancel);
             // Only the fixed extraction directory is cleaned; old recovery material is left alone.
             string staging = MediaUpdateProtocol.GetUpdateStagingDirectoryPath(game);
+            Record("正在清理更新临时目录...");
             try
             {
                 if (DirectorySafety.IsWithin(package, staging) && Directory.Exists(staging)) Directory.Delete(staging, true);
             }
             catch (Exception ex) { Record("更新成功，但解压目录清理失败：" + ex.Message); }
-            Record("更新成功，正在重新启动启动器。");
+            Record(SuccessMessage);
+            // Installation is complete; cancellation must not turn success into an installation failure.
+            await Task.Delay(5000);
+            Record("正在重新启动启动器。");
             StartLauncher(game, Record);
             return 0;
         }

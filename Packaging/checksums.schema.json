@@ -1,12 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "更新包 SHA-256 校验清单",
-  "description": "放置于 update.json 同级；包含包内全部文件，仅排除根目录 checksums.json 自身。路径唯一性、实际文件集合和 Windows 路径规则由更新器额外检查。",
+  "description": "放置于 update 同级；包含包内全部文件，仅排除根目录 checksums 自身。路径唯一性、实际文件集合和 Windows 路径规则由更新器额外检查。",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "algorithm", "files"],
+  "required": ["algorithm", "files"],
   "properties": {
-    "schemaVersion": { "const": 1 },
     "algorithm": { "const": "SHA256" },
     "files": {
       "type": "array",

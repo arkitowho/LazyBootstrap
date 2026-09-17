@@ -147,11 +147,11 @@ internal static partial class UpdateRegression
         Test("XML 新操作字段严格校验且拒绝旧行编辑", root =>
         {
             var (game, staging) = Pack(root, Edit("contents/config.xml", Value("/config", "new"))); Put(game, "contents/config.xml", "<config/>");
-            string manifest = File.ReadAllText(Path.Combine(staging, "update.json"));
+            string manifest = File.ReadAllText(Path.Combine(staging, "update"));
             foreach (string invalid in new[] { manifest.Replace("editXml", "editText"), manifest.Replace("\"xpath\"", "\"line\""),
                          manifest.Replace("\"setValue\"", "\"unknown\""), manifest.Replace("\"xpath\":", "\"match\": \"old\", \"xpath\":"),
                          manifest.Replace("\"setValue\"", "\"remove\"") })
-            { Put(staging, "update.json", invalid); Seal(staging); Reject(() => Apply(game, staging)); }
+            { Put(staging, "update", invalid); Seal(staging); Reject(() => Apply(game, staging)); }
             var op = Edit("contents/config.xml", Value("/config", "x")); op.Namespaces = new() { [""] = "urn:bad" }; Reject(() => MediaXmlEditor.Validate(op));
             op.Namespaces = new() { ["xml"] = "urn:bad" }; Reject(() => MediaXmlEditor.Validate(op));
             op = Copy("source/a", "contents/a"); op.Namespaces = new() { ["p"] = "urn:p" }; Manifest(staging, op); Seal(staging); Reject(() => Apply(game, staging));

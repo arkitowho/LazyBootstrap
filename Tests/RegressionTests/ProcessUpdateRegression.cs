@@ -62,11 +62,21 @@ internal static partial class UpdateRegression
             string package = Verify(game, staging);
             using var parent = new WaitingChild(); using var other = new WaitingChild();
             var messages = new List<string>();
-            Task<int> task = MediaUpdateRunner.RunAsync(game, package, parent.Process.Id, messages.Add);
+            var clock = Stopwatch.StartNew();
+            var progressTimes = new List<TimeSpan>();
+            Task<int> task = MediaUpdateRunner.RunAsync(game, package, parent.Process.Id, message =>
+            {
+                messages.Add(message);
+                progressTimes.Add(clock.Elapsed);
+            });
             Check(!task.IsCompleted, "没有等待指定进程"); Equal(game, "contents/a", "old");
             parent.Exit(); Check(task.GetAwaiter().GetResult() == 0, "退出后安装失败");
             Equal(game, "contents/a", "new"); Check(!other.Process.HasExited, "结束了其他进程");
             Check(!Directory.Exists(staging), "成功未清理解压目录"); CheckNoTransaction(game);
+            int success = messages.IndexOf("Update Successful!");
+            int restart = messages.IndexOf("正在重新启动启动器。");
+            Check(success > 0 && restart > success, "缺少成功提示或重启顺序错误");
+            Check(progressTimes[restart] - progressTimes[success] >= TimeSpan.FromMilliseconds(4950), "成功提示未停留 5 秒");
             string log = File.ReadAllText(Path.Combine(game, ".media-update/updater_log.txt"));
             Check(log.Contains("Package SHA256 verification completed.") && log.Contains("Installing"), "校验与安装未保存在同一日志");
         });
@@ -89,7 +99,7 @@ internal static partial class UpdateRegression
         {
             var (game, package) = Pack(root, Copy("source/a", "contents/a")); Put(package, "source/a", "verified"); Put(package, "说明.txt", "readme"); Seal(package);
             Verify(game, package); Put(package, "source/a", "current");
-            using var checksumLock = File.Open(Path.Combine(package, "checksums.json"), FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            using var checksumLock = File.Open(Path.Combine(package, "checksums"), FileMode.Open, FileAccess.ReadWrite, FileShare.None);
             using var readmeLock = File.Open(Path.Combine(package, "说明.txt"), FileMode.Open, FileAccess.ReadWrite, FileShare.None);
             var messages = new List<string>(); using var engine = MediaUpdateEngine.Prepare(game, package, messages.Add); engine.Apply();
             Equal(game, "contents/a", "current"); Check(messages.Count(m => m == "正在预演更新...") == 1, "预演次数错误");
@@ -111,6 +121,7 @@ internal static partial class UpdateRegression
                 }).GetAwaiter().GetResult();
                 Check(result != 0 && Directory.Exists(package), "失败没有保留目录");
                 Check(!messages.Any(m => m.Contains("重新启动") || m.Contains("手动启动")), "失败仍尝试启动");
+                Check(!messages.Contains("Update Successful!"), "安装失败显示成功提示");
                 Equal(game, "contents/a", "new"); Equal(game, "contents/b", "old");
             }
             finally { File.SetAttributes(target, FileAttributes.Normal); }

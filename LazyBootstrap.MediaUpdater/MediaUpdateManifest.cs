@@ -9,7 +9,6 @@ namespace LazyBootstrap.MediaUpdate;
 
 internal sealed class MediaUpdateManifest
 {
-    public int SchemaVersion { get; set; }
     public List<MediaUpdateOperation> Operations { get; set; } = [];
 
     internal static MediaUpdateManifest Parse(byte[] bytes)
@@ -19,8 +18,8 @@ internal sealed class MediaUpdateManifest
             using var document = JsonDocument.Parse(bytes);
             ValidateJson(document.RootElement);
             var manifest = JsonSerializer.Deserialize(bytes, MediaUpdateJsonContext.Default.MediaUpdateManifest);
-            if (manifest == null || manifest.SchemaVersion != 1 || manifest.Operations == null || manifest.Operations.Count == 0)
-                throw new IOException("更新清单版本或操作列表无效。");
+            if (manifest == null || manifest.Operations == null || manifest.Operations.Count == 0)
+                throw new IOException("更新清单操作列表无效。");
             foreach (var operation in manifest.Operations) ValidateOperation(operation);
             return manifest;
         }

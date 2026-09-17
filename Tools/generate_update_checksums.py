@@ -1,4 +1,4 @@
-"""为更新包生成 checksums.json；仅使用 Python 标准库。"""
+"""为更新包生成 checksums；仅使用 Python 标准库。"""
 
 import argparse
 import hashlib
@@ -10,7 +10,7 @@ import sys
 import tempfile
 
 
-CHECKSUM_NAME = "checksums.json"
+CHECKSUM_NAME = "checksums"
 
 
 def validate_relative(path: str) -> None:
@@ -67,12 +67,12 @@ def generate(directory: str) -> Path:
     for ancestor in [root, *root.parents]:
         reject_link(ancestor)
     files = scan(root)
-    manifests = [path for path in files if path.name.lower() == "update.json"]
+    manifests = [path for path in files if path.name.lower() == "update"]
     if len(manifests) != 1:
-        raise ValueError("更新包必须包含且仅包含一份 update.json。")
+        raise ValueError("更新包必须包含且仅包含一份 update。")
     package = manifests[0].parent
     if any(not path.is_relative_to(package) for path in files):
-        raise ValueError("所有文件必须位于 update.json 所在的包根目录内。")
+        raise ValueError("所有文件必须位于 update 所在的包根目录内。")
     existing = [path for path in files if path.parent == package and path.name.lower() == CHECKSUM_NAME]
     destination = existing[0] if existing else package / CHECKSUM_NAME
     payload = sorted((path for path in files if path != destination),
@@ -94,7 +94,7 @@ def generate(directory: str) -> Path:
     current = [path for path in scan(root) if path != destination]
     if set(current) != set(payload) or any(fingerprint(path) != stamps[path] for path in current):
         raise ValueError("计算期间更新包发生变化，请停止修改文件后重新生成。")
-    document = {"schemaVersion": 1, "algorithm": "SHA256", "files": entries}
+    document = {"algorithm": "SHA256", "files": entries}
     temporary = None
     try:
         with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", newline="\n",

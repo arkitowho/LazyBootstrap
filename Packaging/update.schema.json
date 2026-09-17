@@ -1,16 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "MediaUpdater 更新清单 v1",
+  "title": "MediaUpdater 更新清单",
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "schemaVersion",
     "operations"
   ],
   "properties": {
-    "schemaVersion": {
-      "const": 1
-    },
     "operations": {
       "type": "array",
       "minItems": 1,

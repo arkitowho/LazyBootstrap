@@ -231,8 +231,8 @@ internal static partial class UpdateRegression
         Directory.CreateDirectory(Path.Combine(game, "contents")); Directory.CreateDirectory(Path.Combine(game, "asphyxia"));
         Manifest(staging, ops); return (game, staging);
     }
-    private static void Manifest(string staging, params MediaUpdateOperation[] ops) => Put(staging, "update.json",
-        JsonSerializer.Serialize(new MediaUpdateManifest { SchemaVersion = 1, Operations = ops.ToList() }, MediaUpdateJsonContext.Default.MediaUpdateManifest));
+    private static void Manifest(string staging, params MediaUpdateOperation[] ops) => Put(staging, "update",
+        JsonSerializer.Serialize(new MediaUpdateManifest { Operations = ops.ToList() }, MediaUpdateJsonContext.Default.MediaUpdateManifest));
     private static MediaUpdateOperation Copy(string source, string target) => new() { Type = "copy", Source = source, Target = target };
     private static MediaUpdateOperation Mirror(string source, string target) => new() { Type = "mirror", Source = source, Target = target };
     private static MediaUpdateOperation Delete(string target) => new() { Type = "delete", Target = target };

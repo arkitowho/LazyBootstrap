@@ -11,7 +11,6 @@ namespace LazyBootstrap.MediaUpdate;
 
 internal sealed class MediaUpdateChecksumManifest
 {
-    public required int SchemaVersion { get; set; }
     public required string Algorithm { get; set; }
     public required List<MediaUpdateChecksumFile> Files { get; set; }
 }
@@ -24,7 +23,7 @@ internal sealed class MediaUpdateChecksumFile
 
 internal static class MediaUpdateChecksums
 {
-    public const string FileName = "checksums.json";
+    public const string FileName = "checksums";
 
     // Returns only the package location. There is no persistent verification handoff.
     public static string Verify(string game, string staging, Action<string> report = null,
@@ -40,8 +39,8 @@ internal static class MediaUpdateChecksums
             var files = new List<string>();
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             Collect(staging);
-            var manifests = files.Where(p => Path.GetFileName(p).Equals("update.json", StringComparison.OrdinalIgnoreCase)).ToArray();
-            if (manifests.Length != 1) throw new IOException("更新包必须包含且仅包含一份 update.json；不支持旧版 sync.bat 更新包。");
+            var manifests = files.Where(p => Path.GetFileName(p).Equals(MediaUpdateProtocol.ManifestFileName, StringComparison.OrdinalIgnoreCase)).ToArray();
+            if (manifests.Length != 1) throw new IOException("更新包必须包含且仅包含一份 update；不支持旧版 sync.bat 更新包。");
             string manifestPath = manifests[0];
             string package = Path.GetDirectoryName(manifestPath)!;
             foreach (string path in files)
@@ -52,9 +51,9 @@ internal static class MediaUpdateChecksums
             using var json = JsonDocument.Parse(checksumBytes);
             MediaUpdateManifest.ValidateJson(json.RootElement);
             var checksums = JsonSerializer.Deserialize(checksumBytes, MediaUpdateJsonContext.Default.MediaUpdateChecksumManifest);
-            if (checksums == null || checksums.SchemaVersion != 1 || checksums.Algorithm != "SHA256"
+            if (checksums == null || checksums.Algorithm != "SHA256"
                 || checksums.Files == null || checksums.Files.Count == 0)
-                throw new IOException("checksums.json 的版本、算法或文件列表无效。");
+                throw new IOException("checksums 的算法或文件列表无效。");
             var expected = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (var entry in checksums.Files)
             {
