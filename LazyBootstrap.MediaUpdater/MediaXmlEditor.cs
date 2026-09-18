@@ -2,18 +2,19 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Xml;
 using System.Xml.XPath;
 
 namespace LazyBootstrap.MediaUpdate;
 
-// XML is transformed entirely in memory; only the transaction engine writes the resulting bytes.
+// XML is transformed entirely in memory; only the installation engine writes the resulting bytes.
 internal static class MediaXmlEditor
 {
     private const string XmlNamespace = "http://www.w3.org/XML/1998/namespace";
     private const string XmlnsNamespace = "http://www.w3.org/2000/xmlns/";
 
-    public static void Validate(MediaUpdateOperation operation)
+    public static void Validate(MediaUpdateOperation operation, CancellationToken cancel = default)
     {
         int index = 0;
         try
@@ -21,6 +22,7 @@ internal static class MediaXmlEditor
             var namespaces = CreateNamespaces(new NameTable(), operation);
             foreach (var edit in operation.Edits)
             {
+                cancel.ThrowIfCancellationRequested();
                 index++;
                 if (edit == null || string.IsNullOrWhiteSpace(edit.XPath)) throw new IOException("必须指定 XPath。");
                 var expression = XPathExpression.Compile(edit.XPath);
@@ -45,18 +47,22 @@ internal static class MediaXmlEditor
         }
     }
 
-    public static byte[] Apply(byte[] bytes, MediaUpdateOperation operation)
+    public static byte[] Apply(byte[] bytes, MediaUpdateOperation operation, CancellationToken cancel = default)
     {
         int index = 0;
         try
         {
+            cancel.ThrowIfCancellationRequested();
             var (encoding, bomLength, original) = Decode(bytes, operation.Encoding ?? "auto");
+            cancel.ThrowIfCancellationRequested();
             var document = Parse(original);
+            cancel.ThrowIfCancellationRequested();
             var namespaces = CreateNamespaces(document.NameTable, operation);
             string newline = DetectNewline(original);
             bool finalNewline = original.EndsWith('\n') || original.EndsWith('\r');
             foreach (var edit in operation.Edits)
             {
+                cancel.ThrowIfCancellationRequested();
                 index++;
                 var matches = document.SelectNodes(edit.XPath, namespaces);
                 if (matches == null || matches.Count != 1)
@@ -111,13 +117,17 @@ internal static class MediaXmlEditor
                 NewLineChars = newline,
                 CheckCharacters = true
             };
+            cancel.ThrowIfCancellationRequested();
             using var output = new EncodingStringWriter(encoding);
             using (var writer = XmlWriter.Create(output, settings)) document.Save(writer);
+            cancel.ThrowIfCancellationRequested();
             string serialized = output.ToString();
             if (finalNewline && !serialized.EndsWith('\n') && !serialized.EndsWith('\r')) serialized += newline;
             else if (!finalNewline) serialized = serialized.TrimEnd('\r', '\n');
             Parse(serialized);
+            cancel.ThrowIfCancellationRequested();
             byte[] content = encoding.GetBytes(serialized);
+            cancel.ThrowIfCancellationRequested();
             var result = new byte[bomLength + content.Length];
             bytes.AsSpan(0, bomLength).CopyTo(result);
             content.CopyTo(result, bomLength);
@@ -133,7 +143,8 @@ internal static class MediaXmlEditor
     private static IOException Error(MediaUpdateOperation operation, int index, Exception error)
     {
         string xpath = index > 0 && index <= operation.Edits.Count ? operation.Edits[index - 1]?.XPath ?? "未指定" : "未执行";
-        return new IOException($"无法修改 XML {operation.Target}：编辑 {index}，XPath「{xpath}」：{error.Message}", error);
+        string detail = $"编辑 {index}，XPath「{xpath}」：{error.Message}";
+        return new MediaUpdateException(operation.Target, detail, error, $"无法修改 XML {operation.Target}：{detail}");
     }
 
     private static XmlReaderSettings ReaderSettings() => new()

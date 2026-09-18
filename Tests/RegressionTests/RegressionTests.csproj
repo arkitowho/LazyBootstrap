@@ -19,7 +19,10 @@
     <Compile Include="../../LazyBootstrap.MediaUpdater/MediaUpdateSecurity.cs" Link="MediaUpdateSecurity.cs" />
     <Compile Include="../../LazyBootstrap.MediaUpdater/MediaUpdateProtocol.cs" Link="MediaUpdateProtocol.cs" />
     <Compile Include="../../LazyBootstrap.MediaUpdater/MediaUpdateRunner.cs" Link="MediaUpdateRunner.cs" />
+    <Compile Include="../../LazyBootstrap.MediaUpdater/MediaUpdateProgress.cs" Link="MediaUpdateProgress.cs" />
+    <Compile Include="../../LazyBootstrap.MediaUpdater/MediaUpdateDashboard.cs" Link="MediaUpdateDashboard.cs" />
     <Compile Include="../../LazyBootstrap.MediaUpdater/MediaUpdateManifest.cs" Link="MediaUpdateManifest.cs" />
+    <Compile Include="../../LazyBootstrap.MediaUpdater/MediaUpdateException.cs" Link="MediaUpdateException.cs" />
     <Compile Include="../../LazyBootstrap.MediaUpdater/MediaUpdateChecksums.cs" Link="MediaUpdateChecksums.cs" />
     <Compile Include="../../LazyBootstrap.MediaUpdater/MediaUpdateLog.cs" Link="MediaUpdateLog.cs" />
     <Compile Include="../../LazyBootstrap.MediaUpdater/MediaUpdateAccess.cs" Link="MediaUpdateAccess.cs" />
@@ -33,6 +36,7 @@
     <Compile Include="../../LazyBootstrap/Platform/FileStateSnapshot.cs" Link="FileStateSnapshot.cs" />
     <Compile Include="../../LazyBootstrap/FileSystem/LauncherLocation.cs" Link="LauncherLocation.cs" />
     <Compile Include="../../LazyBootstrap/FileSystem/SafeFileWriter.cs" Link="SafeFileWriter.cs" />
+    <Compile Include="../../LazyBootstrap/Serialization/AppConfigDocument.cs" Link="AppConfigDocument.cs" />
     <Compile Include="../../LazyBootstrap/Serialization/AppConfigStore.cs" Link="AppConfigStore.cs" />
     <Compile Include="../../LazyBootstrap/Serialization/AppConfigDefaults.cs" Link="AppConfigDefaults.cs" />
     <Compile Include="../../LazyBootstrap.Launcher/LauncherConfigPreparation.cs" Link="LauncherConfigPreparation.cs" />

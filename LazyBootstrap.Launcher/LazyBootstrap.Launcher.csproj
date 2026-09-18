@@ -22,9 +22,8 @@
   <ItemGroup>
     <Compile Include="../LazyBootstrap/FileSystem/LauncherLocation.cs" Link="Shared/LauncherLocation.cs" />
     <Compile Include="../LazyBootstrap/FileSystem/SafeFileWriter.cs" Link="Shared/SafeFileWriter.cs" />
-    <Compile Include="../LazyBootstrap/Serialization/AppConfigStore.cs" Link="Shared/AppConfigStore.cs" />
+    <Compile Include="../LazyBootstrap/Serialization/AppConfigDocument.cs" Link="Shared/AppConfigDocument.cs" />
     <Compile Include="../LazyBootstrap/Serialization/AppConfigDefaults.cs" Link="Shared/AppConfigDefaults.cs" />
     <PackageReference Include="Tomlyn" Version="2.10.1" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.7" />
   </ItemGroup>
 </Project>

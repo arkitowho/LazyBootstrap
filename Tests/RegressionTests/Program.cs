@@ -8,6 +8,8 @@ using LazyBootstrap.FileSystem;
 using LazyBootstrap.Services;
 using LazyBootstrap.MediaUpdate;
 
+[assembly: System.Runtime.Versioning.SupportedOSPlatform("windows")]
+
 internal static class Program
 {
     private static int Main(string[] args)

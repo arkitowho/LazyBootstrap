@@ -102,7 +102,7 @@ internal static class MediaUpdateChecksums
                 report?.Invoke($"正在校验更新包 {++completed}/{payloads.Length}：{relative}");
             }
             cancel.ThrowIfCancellationRequested();
-            var manifest = MediaUpdateManifest.Parse(manifestBytes);
+            var manifest = MediaUpdateManifest.Parse(manifestBytes, cancel);
             foreach (var op in manifest.Operations) MediaUpdateSecurity.ResolveDestination(op.Target, game);
             Write("Package SHA256 verification completed.");
             return package;
@@ -119,9 +119,14 @@ internal static class MediaUpdateChecksums
                 }
             }
         }
+        catch (OperationCanceledException ex)
+        {
+            Write(MediaUpdateLog.FormatFailure("Package verification cancelled", ex, $"staging={staging}"));
+            throw;
+        }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
         {
-            Write("Package verification failed: " + ex.Message);
+            Write(MediaUpdateLog.FormatFailure("Package verification failed", ex, $"staging={staging}"));
             throw new IOException("更新包疑似被修改或损坏，已停止更新。" + ex.Message, ex);
         }
     }

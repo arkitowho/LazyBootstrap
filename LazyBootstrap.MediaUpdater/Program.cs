@@ -13,6 +13,7 @@ internal static class Program
     private static async Task<int> Main(string[] args)
     {
         Console.OutputEncoding = Encoding.UTF8;
+        await using var display = new MediaUpdateConsole();
         try
         {
             string game = null, package = null, parent = null;
@@ -37,32 +38,22 @@ internal static class Program
             Console.CancelKeyPress += handler;
             try
             {
-                int result = await MediaUpdateRunner.RunAsync(Path.GetFullPath(game), Path.GetFullPath(package), parentPid, ReportProgress, cancel.Token);
-                if (result != 0 && !Console.IsInputRedirected)
-                {
-                    Console.WriteLine("按回车关闭此窗口。");
-                    Console.ReadLine();
-                }
+                string gameDirectory = Path.GetFullPath(game);
+                display.SetGameDirectory(gameDirectory);
+                int result = await MediaUpdateRunner.RunAsync(gameDirectory, Path.GetFullPath(package), parentPid,
+                    display.ReportText, cancel.Token, display.ReportProgress, AppContext.BaseDirectory);
+                await display.WaitForAcknowledgementAsync();
                 return result;
             }
             finally { Console.CancelKeyPress -= handler; }
         }
-        catch (Exception ex) { Console.Error.WriteLine(ex.Message); return 2; }
-    }
-
-    private static void ReportProgress(string message)
-    {
-        if (message != MediaUpdateRunner.SuccessMessage || Console.IsOutputRedirected)
+        catch (Exception ex)
         {
-            Console.WriteLine(message);
-            return;
+            display.ReportText(ex.Message);
+            display.ReportProgress(new(MediaUpdateStage.Waiting, ex.Message)
+            { Status = MediaUpdateStatus.Failed, Detail = ex.Message, RequiresAcknowledgement = true });
+            await display.WaitForAcknowledgementAsync();
+            return 2;
         }
-        var previousColor = Console.ForegroundColor;
-        try
-        {
-            Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine(message);
-        }
-        finally { Console.ForegroundColor = previousColor; }
     }
 }

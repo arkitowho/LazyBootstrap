@@ -58,7 +58,7 @@ class ChecksumToolTests(unittest.TestCase):
         game = self.root / "game"
         (game / "contents").mkdir(parents=True)
         (game / "asphyxia").mkdir()
-        return game, game / ".media-update" / "update_tmp"
+        return game, game / ".media-update" / "tmp"
 
     def test_unicode_empty_large_hidden_and_stable_output(self):
         folder = self.package / "source" / "中文 日本"
@@ -239,11 +239,13 @@ class ChecksumToolTests(unittest.TestCase):
                                            "--parent-pid", self.last_launcher_pid], environment=environment)
                 self.assertEqual(result.returncode, 0, result.stdout)
                 self.assertIn(b"Update Successful!", result.stdout)
+                self.assertNotIn(b"\x1b", result.stdout)
+                self.assertNotIn("┌".encode("utf-8"), result.stdout)
                 self.assertFalse(staging.exists())
                 self.assertFalse((game / ".media-update/verified-package.json").exists())
-                self.assertTrue((game / ".media-update/updater_log.txt").is_file())
-                self.assertFalse((game / "updater_log.txt").exists())
-                self.assertFalse((game / "update_tmp").exists())
+                self.assertTrue((game / ".media-update/update_log.txt").is_file())
+                self.assertFalse((game / "update_log.txt").exists())
+                self.assertFalse((game / "tmp").exists())
                 if kind == "editXml":
                     self.assertIn('value="/ENABLED"', config.read_text(encoding="utf-8"))
                     self.assertIn('sensivity="1.2"', config.read_text(encoding="utf-8"))

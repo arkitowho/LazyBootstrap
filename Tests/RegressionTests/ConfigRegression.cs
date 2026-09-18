@@ -12,6 +12,47 @@ internal static partial class UpdateRegression
 {
     private static void RunConfigTests()
     {
+        Test("共享文档仅修改内存且配置读取不缓存外部变更", root =>
+        {
+            string path = Path.Combine(root, "config.toml");
+            const string original = "# keep\n[Setting]\nnoasphyxia = \"true\" # user\ncustom = \"unknown\"\n";
+            File.WriteAllText(path, original);
+            var document = AppConfigDocument.Parse(original);
+            document.CompleteDefaults();
+            Check(File.ReadAllText(path) == original, "内存文档修改了磁盘");
+            string prepared = document.ToText();
+            Check(prepared.Contains("# keep") && prepared.Contains("# user") && prepared.Contains("custom = \"unknown\""), "补齐丢失用户字段或注释");
+            Check(AppConfigDocument.Parse(prepared).ReadString("Setting", "noasphyxia") == "true", "补齐覆盖用户值");
+            foreach (string newline in new[] { "\n", "\r\n" })
+            {
+                var multiline = AppConfigDocument.Parse($"[Setting]{newline}note = \"\"\"first{newline}second\"\"\"{newline}");
+                string originalNote = multiline.ReadString("Setting", "note");
+                multiline.UpsertString("Setting", "auto-launch", "true");
+                Check(multiline.ReadString("Setting", "note") == originalNote, "编辑后改变了多行 TOML 值");
+                Check(AppConfigDocument.Parse(multiline.ToText()).ReadString("Setting", "note") == originalNote, "保存后改变了多行 TOML 值");
+            }
+            var store = new AppConfigStore(path, null);
+            Check(store.ReadBool("Setting", "noasphyxia", false), "首次读取错误");
+            File.WriteAllText(path, original.Replace("\"true\"", "\"false\"").Replace("unknown", "external"));
+            Check(!store.ReadBool("Setting", "noasphyxia", true), "跨操作缓存了旧配置");
+            store.WriteString("Setting", "auto-launch", "true");
+            Check(store.ReadString("Setting", "custom") == "external", "保存覆盖外部变更");
+        });
+
+        Test("配置快照恢复完整字节且不恢复损坏目标", root =>
+        {
+            string path = LauncherConfigPreparation.Prepare(root, root);
+            byte[] original = File.ReadAllBytes(path);
+            var store = new AppConfigStore(path, null);
+            var snapshot = store.CaptureSnapshot();
+            store.WriteString("Setting", "compatlayer", "true");
+            snapshot.Restore();
+            Check(File.ReadAllBytes(path).SequenceEqual(original), "配置恢复改变原始字节");
+            File.WriteAllText(path, "[broken");
+            RejectConfig(snapshot.Restore);
+            Equal(root, "config.toml", "[broken");
+        });
+
         Test("显示配置与启用状态一起保存，保留其他设置和注释", root =>
         {
             string path = LauncherConfigPreparation.Prepare(root, root);
@@ -186,11 +227,11 @@ internal static partial class UpdateRegression
         Test("替换前配置消失不会通过 Move 重建", root =>
         {
             string path = LauncherConfigPreparation.Prepare(root, root);
-            bool result = SafeFileWriter.TryWriteAllText(path, AppConfigDefaults.CreateDefaultConfigText(), candidate =>
+            bool result = SafeFileWriter.TryReplaceExistingText(path, AppConfigDefaults.CreateDefaultConfigText(), candidate =>
             {
                 if (candidate == path) File.Delete(path);
                 return string.Empty;
-            }, out _, existingOnly: true);
+            }, out _);
             Check(!result && !File.Exists(path), "配置在替换竞态中被重建");
             Check(!Directory.GetFiles(root, "*.tmp").Any(), "替换失败遗留临时文件");
         });
@@ -215,8 +256,8 @@ internal static partial class UpdateRegression
         }
         Test("兼容层设置失败后的配置恢复也不能重建文件", root =>
         {
-            string path = LauncherConfigPreparation.Prepare(root, root); var snapshot = FileStateSnapshot.Capture(path);
-            File.Delete(path); RejectConfig(() => snapshot.Restore(existingConfigOnly: true));
+            string path = LauncherConfigPreparation.Prepare(root, root); var snapshot = new AppConfigStore(path, null).CaptureSnapshot();
+            File.Delete(path); RejectConfig(() => snapshot.Restore());
             Check(!File.Exists(path), "设置失败恢复重建了配置");
         });
         Test("配置位置独立于工作目录及游戏路径覆盖", root =>

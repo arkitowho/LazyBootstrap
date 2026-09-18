@@ -9,12 +9,21 @@ namespace LazyBootstrap.FileSystem
         private const int BufferSize = 4096;
         private static readonly Encoding Utf8NoBom = new UTF8Encoding(false);
 
-        public static bool TryWriteAllText(string path, string content, Func<string, string> validateFile, out string error, bool existingOnly = false)
+        public static bool TryWriteAllText(string path, string content, Func<string, string> validateFile, out string error)
         {
-            return TryWriteAllBytes(path, Utf8NoBom.GetBytes(content ?? string.Empty), validateFile, out error, existingOnly);
+            return TryWriteAllBytes(path, Utf8NoBom.GetBytes(content ?? string.Empty), validateFile, out error);
         }
 
-        public static bool TryWriteAllBytes(string path, byte[] content, Func<string, string> validateFile, out string error, bool existingOnly = false)
+        public static bool TryWriteAllBytes(string path, byte[] content, Func<string, string> validateFile, out string error)
+            => TryWrite(path, content, validateFile, out error, existingOnly: false);
+
+        public static bool TryReplaceExistingText(string path, string content, Func<string, string> validateFile, out string error)
+            => TryReplaceExistingBytes(path, Utf8NoBom.GetBytes(content ?? string.Empty), validateFile, out error);
+
+        public static bool TryReplaceExistingBytes(string path, byte[] content, Func<string, string> validateFile, out string error)
+            => TryWrite(path, content, validateFile, out error, existingOnly: true);
+
+        private static bool TryWrite(string path, byte[] content, Func<string, string> validateFile, out string error, bool existingOnly)
         {
             error = string.Empty;
             if (string.IsNullOrWhiteSpace(path))

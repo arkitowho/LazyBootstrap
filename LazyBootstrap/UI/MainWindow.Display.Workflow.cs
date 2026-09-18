@@ -74,14 +74,12 @@ namespace LazyBootstrap.UI
                     state,
                     mainDisplayId,
                     legacyMainIndex,
-                    0,
-                    out _);
+                    0);
                 state.SelectedSubDisplay = ResolveConfiguredDisplay(
                     state,
                     subDisplayId,
                     legacySubIndex,
-                    Math.Min(1, Math.Max(0, state.Displays.Count - 1)),
-                    out _);
+                    Math.Min(1, Math.Max(0, state.Displays.Count - 1)));
                 state.SelectedMainRotation = state.Rotations.FirstOrDefault(option => option.Angle == mainRotation) ?? state.Rotations.FirstOrDefault();
                 state.SelectedSubRotation = state.Rotations.FirstOrDefault(option => option.Angle == subRotation) ?? state.Rotations.FirstOrDefault();
                 state.SelectedMainResolution = _appConfig.ReadString(AppConfigDefaults.DisplaySectionName, "mainresolution", string.Empty);
@@ -586,10 +584,8 @@ namespace LazyBootstrap.UI
             DisplayConfigurationState state,
             string persistentId,
             string legacyIndexText,
-            int defaultIndex,
-            out bool migratedLegacyIndex)
+            int defaultIndex)
         {
-            migratedLegacyIndex = false;
             var selectedById = GetDisplayByPersistentId(state, persistentId);
             if (selectedById != null)
             {
@@ -603,7 +599,6 @@ namespace LazyBootstrap.UI
 
             if (int.TryParse(legacyIndexText, out int legacyIndex))
             {
-                migratedLegacyIndex = true;
                 return GetDisplayByIndex(state, legacyIndex) ?? GetDisplayByIndex(state, defaultIndex);
             }
 

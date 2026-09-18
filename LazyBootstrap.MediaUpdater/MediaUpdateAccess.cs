@@ -21,7 +21,7 @@ internal static class MediaUpdateAccess
         RejectReadOnly(path);
         // CopyFile and create/truncate writes reject existing hidden targets even when OPEN_EXISTING succeeds.
         if ((File.GetAttributes(path) & FileAttributes.Hidden) != 0)
-            throw new IOException("目标文件为隐藏文件，无法直接覆盖：" + path);
+            throw new MediaUpdateException(path, "目标文件为隐藏文件，无法直接覆盖。", null);
         Open(path, GenericWrite, FileShare.None, false);
     }
 
@@ -38,7 +38,7 @@ internal static class MediaUpdateAccess
     private static void RejectReadOnly(string path)
     {
         if ((File.GetAttributes(path) & FileAttributes.ReadOnly) != 0)
-            throw new IOException("文件为只读，无法覆盖或删除：" + path);
+            throw new MediaUpdateException(path, "文件为只读，无法覆盖或删除。", null);
     }
 
     private static void Open(string path, uint access, FileShare share, bool directory)
@@ -49,7 +49,8 @@ internal static class MediaUpdateAccess
         if (handle.IsInvalid)
         {
             var error = new Win32Exception(Marshal.GetLastWin32Error());
-            throw new IOException($"文件被占用或权限不足：{path}（Windows 错误 {error.NativeErrorCode}：{error.Message}）", error);
+            throw new MediaUpdateException(path,
+                $"文件被占用或权限不足（Windows 错误 {error.NativeErrorCode}：{error.Message}）。", error);
         }
     }
 

@@ -28,17 +28,22 @@ internal sealed class MediaUpdatePlan
         _game = game;
         _cancel = cancel;
 
-        var manifest = MediaUpdateManifest.Parse(File.ReadAllBytes(Path.Combine(package, MediaUpdateProtocol.ManifestFileName)));
+        var manifest = MediaUpdateManifest.Parse(File.ReadAllBytes(Path.Combine(package, MediaUpdateProtocol.ManifestFileName)), cancel);
         _package = package;
 
         foreach (var op in manifest.Operations)
         {
             string target = MediaUpdateSecurity.ValidateRelativePath(op.Target);
-            string path = MediaUpdateSecurity.ResolveDestination(target, game);
-            if (MediaUpdateSecurity.Same(target, MediaUpdateSecurity.UpdaterPath) && op.Type is "delete" or "editXml")
-                throw new IOException("不能删除或编辑更新器。");
-            Load(target, path, true);
-            for (string parent = Parent(target); parent != null; parent = Parent(parent)) Load(parent, Destination(parent), false);
+            try
+            {
+                string path = MediaUpdateSecurity.ResolveDestination(target, game);
+                if (MediaUpdateSecurity.Same(target, MediaUpdateSecurity.UpdaterPath) && op.Type is "delete" or "editXml")
+                    throw new IOException("不能删除或编辑更新器。");
+                Load(target, path, true);
+                for (string parent = Parent(target); parent != null; parent = Parent(parent)) Load(parent, Destination(parent), false);
+            }
+            catch (Exception ex) when ((ex is IOException or UnauthorizedAccessException) && ex is not MediaUpdateException)
+            { throw new MediaUpdateException(target, ex.Message, ex); }
         }
         // The pending replacement is an internal target, never a package-controlled path.
         Load(MediaUpdateSecurity.PendingPath, Destination(MediaUpdateSecurity.PendingPath), false);
@@ -47,26 +52,33 @@ internal sealed class MediaUpdatePlan
         {
             _cancel.ThrowIfCancellationRequested();
             string target = MediaUpdateSecurity.ValidateRelativePath(op.Target);
-            if (op.Type == "delete") Remove(target);
-            else if (op.Type == "editXml")
+            try
             {
-                if (!After.TryGetValue(target, out var node) || node.IsDirectory) throw new IOException("未找到待修改 XML 文件：" + target);
-                byte[] originalText = node.Content ?? File.ReadAllBytes(node.Source);
-                After[target] = node with { Content = MediaXmlEditor.Apply(originalText, op) };
-            }
-            else
-            {
-                string source = Path.GetFullPath(Path.Combine(_package, op.Source));
-                if (!DirectorySafety.IsWithin(source, Path.Combine(_package, "source"))) throw new IOException("更新源路径越界。");
-
-                if (!File.Exists(source) && !Directory.Exists(source)) throw new IOException("未找到更新源：" + op.Source);
-                if (op.Type == "mirror")
+                if (op.Type == "delete") Remove(target);
+                else if (op.Type == "editXml")
                 {
-                    if (!Directory.Exists(source)) throw new IOException("镜像源必须是目录。");
-                    Remove(target);
+                    if (!After.TryGetValue(target, out var node) || node.IsDirectory)
+                        throw new MediaUpdateException(target, "未找到待修改 XML 文件。", null, "未找到待修改 XML 文件：" + target);
+                    byte[] originalText = node.Content ?? File.ReadAllBytes(node.Source);
+                    _cancel.ThrowIfCancellationRequested();
+                    After[target] = node with { Content = MediaXmlEditor.Apply(originalText, op, _cancel) };
                 }
-                Copy(source, target);
+                else
+                {
+                    string source = Path.GetFullPath(Path.Combine(_package, op.Source));
+                    if (!DirectorySafety.IsWithin(source, Path.Combine(_package, "source"))) throw new IOException("更新源路径越界。");
+
+                    if (!File.Exists(source) && !Directory.Exists(source)) throw new IOException("未找到更新源：" + op.Source);
+                    if (op.Type == "mirror")
+                    {
+                        if (!Directory.Exists(source)) throw new IOException("镜像源必须是目录。");
+                        Remove(target);
+                    }
+                    Copy(source, target);
+                }
             }
+            catch (Exception ex) when ((ex is IOException or UnauthorizedAccessException) && ex is not MediaUpdateException)
+            { throw new MediaUpdateException(target, ex.Message, ex); }
         }
     }
 

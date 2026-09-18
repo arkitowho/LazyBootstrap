@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Xml;
 using System.Xml.Linq;
 using LazyBootstrap.MediaUpdate;
@@ -11,6 +13,22 @@ internal static partial class UpdateRegression
 {
     private static void RunXmlTests()
     {
+        Test("大量 XML 编辑可取消且取消不会包装成 XML 错误", _ =>
+        {
+            byte[] bytes = Encoding.UTF8.GetBytes("<config><value>old</value></config>");
+            var edits = Enumerable.Repeat(Value("/config/value", "new"), 1_000_000).ToArray();
+            var operation = Edit("contents/config.xml", edits);
+            using var cancel = new CancellationTokenSource();
+            var clock = Stopwatch.StartNew();
+            cancel.CancelAfter(30);
+            try { MediaXmlEditor.Apply(bytes, operation, cancel.Token); throw new Exception("XML 编辑忽略了取消"); }
+            catch (OperationCanceledException ex) { Check(ex.CancellationToken == cancel.Token, "取消令牌丢失"); }
+            Check(clock.Elapsed < TimeSpan.FromSeconds(3), "取消后仍继续处理 XML 编辑列表");
+            Check(Encoding.UTF8.GetString(bytes) == "<config><value>old</value></config>", "XML 预演修改了输入");
+            try { MediaXmlEditor.Validate(operation, cancel.Token); throw new Exception("XML 校验忽略了取消"); }
+            catch (OperationCanceledException) { }
+        });
+
         Test("XML 属性筛选、文本与属性修改", _ =>
         {
             string xml = TransformXml("<config><option name='a' value='0'/><label><!--keep-->旧值<?keep yes?></label></config>",

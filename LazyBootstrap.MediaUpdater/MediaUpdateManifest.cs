@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Threading;
 
 namespace LazyBootstrap.MediaUpdate;
 
@@ -11,7 +12,7 @@ internal sealed class MediaUpdateManifest
 {
     public List<MediaUpdateOperation> Operations { get; set; } = [];
 
-    internal static MediaUpdateManifest Parse(byte[] bytes)
+    internal static MediaUpdateManifest Parse(byte[] bytes, CancellationToken cancel = default)
     {
         try
         {
@@ -20,7 +21,11 @@ internal sealed class MediaUpdateManifest
             var manifest = JsonSerializer.Deserialize(bytes, MediaUpdateJsonContext.Default.MediaUpdateManifest);
             if (manifest == null || manifest.Operations == null || manifest.Operations.Count == 0)
                 throw new IOException("更新清单操作列表无效。");
-            foreach (var operation in manifest.Operations) ValidateOperation(operation);
+            foreach (var operation in manifest.Operations)
+            {
+                cancel.ThrowIfCancellationRequested();
+                ValidateOperation(operation, cancel);
+            }
             return manifest;
         }
         catch (JsonException ex) { throw new IOException("更新清单 JSON 无效：" + ex.Message, ex); }
@@ -42,7 +47,7 @@ internal sealed class MediaUpdateManifest
             foreach (var child in element.EnumerateArray()) ValidateJson(child);
     }
 
-    private static void ValidateOperation(MediaUpdateOperation op)
+    private static void ValidateOperation(MediaUpdateOperation op, CancellationToken cancel)
     {
         if (op == null) throw new IOException("更新操作不能为空。");
         MediaUpdateSecurity.ValidateRelativePath(op.Target);
@@ -63,7 +68,7 @@ internal sealed class MediaUpdateManifest
             if (op.Source != null || op.Edits == null || op.Edits.Count == 0) throw new IOException("XML 编辑操作无效。");
             if ((op.Encoding ?? "auto") is not ("auto" or "utf-8" or "utf-16le" or "utf-16be" or "gbk" or "shift-jis"))
                 throw new IOException("不支持的文本编码：" + op.Encoding);
-            MediaXmlEditor.Validate(op);
+            MediaXmlEditor.Validate(op, cancel);
         }
         else throw new IOException("未知更新操作：" + op.Type);
     }

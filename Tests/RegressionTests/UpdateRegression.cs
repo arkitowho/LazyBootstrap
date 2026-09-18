@@ -176,7 +176,7 @@ internal static partial class UpdateRegression
             var (game, package) = Pack(root, Copy("source/a", path)); Put(package, "source/a", "new"); Seal(package);
             Reject(() => Apply(game, package)); CheckNoTransaction(game);
         });
-        RunChecksumTests(); RunXmlTests(); RunProcessTests(); RunConfigTests();
+        RunChecksumTests(); RunXmlTests(); RunProcessTests(); RunConfigTests(); RunLogTests();
         return _failed;
     }
 
@@ -227,7 +227,7 @@ internal static partial class UpdateRegression
     }
     private static (string Game, string Staging) Pack(string root, params MediaUpdateOperation[] ops)
     {
-        string game = Path.Combine(root, "game"), staging = Path.Combine(game, ".media-update", "update_tmp");
+        string game = Path.Combine(root, "game"), staging = Path.Combine(game, ".media-update", "tmp");
         Directory.CreateDirectory(Path.Combine(game, "contents")); Directory.CreateDirectory(Path.Combine(game, "asphyxia"));
         Manifest(staging, ops); return (game, staging);
     }

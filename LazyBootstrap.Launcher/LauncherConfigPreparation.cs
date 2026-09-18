@@ -1,6 +1,5 @@
 using System;
 using System.IO;
-using System.Linq;
 using System.Text;
 using LazyBootstrap.FileSystem;
 using LazyBootstrap.Serialization;
@@ -39,7 +38,9 @@ internal static class LauncherConfigPreparation
 
             operation = "读取配置";
             string text = File.ReadAllText(target);
-            if (!string.IsNullOrEmpty(AppConfigStore.ValidateTomlText(text)))
+            AppConfigDocument document;
+            try { document = AppConfigDocument.Parse(text); }
+            catch (InvalidDataException)
             {
                 operation = "备份并修复损坏配置";
                 string backup = target + ".invalid." + DateTime.Now.ToString("yyyyMMddHHmmss") + "." + Guid.NewGuid().ToString("N") + ".bak";
@@ -47,10 +48,12 @@ internal static class LauncherConfigPreparation
                 File.Copy(target, backup);
                 text = AppConfigDefaults.CreateDefaultConfigText();
                 Write(target, text);
+                document = AppConfigDocument.Parse(text);
             }
 
             operation = "补齐配置";
-            string prepared = CompleteDefaults(target, text);
+            document.CompleteDefaults();
+            string prepared = document.ToText();
             if (!string.Equals(prepared, text, StringComparison.Ordinal)) Write(target, prepared);
             return target;
         }
@@ -96,51 +99,7 @@ internal static class LauncherConfigPreparation
 
     private static void Write(string path, string text)
     {
-        if (!SafeFileWriter.TryWriteAllText(path, text, AppConfigStore.ValidateTomlFile, out var error))
+        if (!SafeFileWriter.TryWriteAllText(path, text, file => AppConfigDocument.Validate(File.ReadAllText(file)), out var error))
             throw new IOException(error);
-    }
-
-    private static string CompleteDefaults(string path, string text)
-    {
-        var config = new AppConfigStore(path, null);
-        var document = AppConfigStore.TomlLineDocument.FromText(text);
-        bool changed = false;
-        foreach (var entry in AppConfigDefaults.Defaults)
-        {
-            string existing = config.ReadString(entry.Section, entry.Key, null);
-            if (existing == null || (string.IsNullOrWhiteSpace(existing) && existing != entry.Value))
-            {
-                document.UpsertString(entry.Section, entry.Key, entry.Value);
-                changed = true;
-            }
-        }
-
-        const string none = "无";
-        var presets = config.LoadServerPresets(none, AppConfigDefaults.AsphyxiaPresetName, AppConfigDefaults.AsphyxiaDefaultUrl);
-        // Compare original presets with normalized ones, changing only the required fields.
-        var original = new System.Collections.Generic.List<ServerPresetItem>();
-        string active = none;
-        bool hasPresets = false;
-        document.LoadServerPresetsFromText(original, ref active, ref hasPresets);
-        foreach (var preset in presets.Presets.Where(p => p.Name != none))
-        {
-            var prior = original.FirstOrDefault(p => string.Equals(p.Name, preset.Name, StringComparison.OrdinalIgnoreCase));
-            if (prior == null)
-            {
-                document.AppendServerPreset(preset);
-                changed = true;
-            }
-            else if (prior.ServerUrl != preset.ServerUrl)
-            {
-                document.UpsertServerPresetString(preset.Name, "serverurl", preset.ServerUrl);
-                changed = true;
-            }
-        }
-        if (config.ReadString("Server", "activepreset", null) != presets.ActivePreset)
-        {
-            document.UpsertString("Server", "activepreset", presets.ActivePreset);
-            changed = true;
-        }
-        return changed ? document.ToText() : text;
     }
 }

@@ -1,7 +1,6 @@
 using System;
 using System.IO;
 using LazyBootstrap.FileSystem;
-using LazyBootstrap.Serialization;
 
 namespace LazyBootstrap.Platform
 {
@@ -33,16 +32,8 @@ namespace LazyBootstrap.Platform
             return new FileStateSnapshot(fullPath, true, File.ReadAllBytes(fullPath));
         }
 
-        public void Restore(bool existingConfigOnly = false)
+        public void Restore()
         {
-            if (existingConfigOnly)
-            {
-                if (!Existed) return;
-                if (!SafeFileWriter.TryWriteAllBytes(Path, _content, AppConfigStore.ValidateTomlFile, out var configError, existingOnly: true))
-                    throw new IOException(configError);
-                return;
-            }
-
             if (Existed)
             {
                 string directory = System.IO.Path.GetDirectoryName(Path);

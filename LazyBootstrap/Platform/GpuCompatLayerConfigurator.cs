@@ -42,7 +42,7 @@ namespace LazyBootstrap.Platform
         }
 
         private sealed record GpuCompatLayerSnapshots(
-            FileStateSnapshot Config,
+            AppConfigStore.Snapshot Config,
             List<FileStateSnapshot> Modules,
             FileStateSnapshot SpiceXml);
 
@@ -385,7 +385,7 @@ namespace LazyBootstrap.Platform
         private GpuCompatLayerSnapshots CaptureAllGpuCompatLayerSnapshots(string spiceXmlPath)
         {
             return new GpuCompatLayerSnapshots(
-                FileStateSnapshot.Capture(_paths.ConfigFilePath),
+                _appConfig.CaptureSnapshot(),
                 CaptureGpuCompatLayerModuleSnapshots(),
                 FileStateSnapshot.Capture(spiceXmlPath));
         }
@@ -404,11 +404,11 @@ namespace LazyBootstrap.Platform
             return snapshots == null ? string.Empty : RestoreSnapshots(snapshots.Config, snapshots.Modules, snapshots.SpiceXml);
         }
 
-        private static string RestoreSnapshots(FileStateSnapshot configSnapshot, IEnumerable<FileStateSnapshot> moduleSnapshots, FileStateSnapshot spiceSnapshot)
+        private static string RestoreSnapshots(AppConfigStore.Snapshot configSnapshot, IEnumerable<FileStateSnapshot> moduleSnapshots, FileStateSnapshot spiceSnapshot)
         {
             var errors = new List<string>();
 
-            var configRestoreError = RestoreSnapshot(configSnapshot, existingConfigOnly: true);
+            var configRestoreError = RestoreSnapshot(configSnapshot.Restore);
             if (!string.IsNullOrWhiteSpace(configRestoreError))
             {
                 errors.Add($"启动器配置回滚失败: {configRestoreError}");
@@ -416,14 +416,14 @@ namespace LazyBootstrap.Platform
 
             foreach (var moduleSnapshot in moduleSnapshots)
             {
-                var moduleRestoreError = RestoreSnapshot(moduleSnapshot);
+                var moduleRestoreError = RestoreSnapshot(moduleSnapshot.Restore);
                 if (!string.IsNullOrWhiteSpace(moduleRestoreError))
                 {
                     errors.Add($"兼容层文件回滚失败: {moduleRestoreError}");
                 }
             }
 
-            var spiceRestoreError = RestoreSnapshot(spiceSnapshot);
+            var spiceRestoreError = RestoreSnapshot(spiceSnapshot.Restore);
             if (!string.IsNullOrWhiteSpace(spiceRestoreError))
             {
                 errors.Add($"spicetools.xml 回滚失败: {spiceRestoreError}");
@@ -432,11 +432,11 @@ namespace LazyBootstrap.Platform
             return errors.Count == 0 ? string.Empty : string.Join(" ", errors);
         }
 
-        private static string RestoreSnapshot(FileStateSnapshot snapshot, bool existingConfigOnly = false)
+        private static string RestoreSnapshot(Action restore)
         {
             try
             {
-                snapshot.Restore(existingConfigOnly);
+                restore();
                 return string.Empty;
             }
             catch (Exception ex)
