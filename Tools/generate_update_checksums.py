@@ -34,13 +34,17 @@ def reject_link(path: Path) -> os.stat_result:
     return info
 
 
-def scan(root: Path) -> list[Path]:
+def scan(root: Path, *, cancel=None) -> list[Path]:
     files = []
     seen = set()
 
     def visit(directory: Path) -> None:
+        if cancel:
+            cancel()
         reject_link(directory)
         for path in directory.iterdir():
+            if cancel:
+                cancel()
             relative = path.relative_to(root).as_posix()
             validate_relative(relative)
             key = relative.upper()
@@ -62,11 +66,23 @@ def fingerprint(path: Path) -> tuple:
     return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns
 
 
-def generate(directory: str) -> Path:
+def generate(directory: str, *, progress=None, cancel=None) -> Path:
+    """可选 progress 接收中文消息；cancel 在取消时应抛出异常。"""
+    def report(message):
+        if progress is None:
+            print(message, flush=True)
+        else:
+            progress(message)
+
+    def checkpoint():
+        if cancel:
+            cancel()
+
+    checkpoint()
     root = Path(os.path.abspath(directory))
     for ancestor in [root, *root.parents]:
         reject_link(ancestor)
-    files = scan(root)
+    files = scan(root) if cancel is None else scan(root, cancel=cancel)
     manifests = [path for path in files if path.name.lower() == "update"]
     if len(manifests) != 1:
         raise ValueError("更新包必须包含且仅包含一份 update。")
@@ -80,18 +96,21 @@ def generate(directory: str) -> Path:
     entries = []
     stamps = {}
     for index, path in enumerate(payload, 1):
+        checkpoint()
         relative = path.relative_to(package).as_posix()
-        print(f"正在计算 SHA-256 {index}/{len(payload)}：{relative}", flush=True)
+        report(f"正在计算 SHA-256 {index}/{len(payload)}：{relative}")
         before = fingerprint(path)
         digest = hashlib.sha256()
         with path.open("rb") as stream:
             while block := stream.read(1024 * 1024):
+                checkpoint()
                 digest.update(block)
         if fingerprint(path) != before:
             raise ValueError(f"计算期间文件发生变化：{relative}")
         stamps[path] = before
         entries.append({"path": relative, "sha256": digest.hexdigest()})
-    current = [path for path in scan(root) if path != destination]
+    rescanned = scan(root) if cancel is None else scan(root, cancel=cancel)
+    current = [path for path in rescanned if path != destination]
     if set(current) != set(payload) or any(fingerprint(path) != stamps[path] for path in current):
         raise ValueError("计算期间更新包发生变化，请停止修改文件后重新生成。")
     document = {"algorithm": "SHA256", "files": entries}
@@ -104,11 +123,12 @@ def generate(directory: str) -> Path:
             stream.write("\n")
             stream.flush()
             os.fsync(stream.fileno())
+        checkpoint()
         os.replace(temporary, destination)
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
-    print(f"已生成校验清单，共 {len(entries)} 个文件：{destination}")
+    report(f"已生成校验清单，共 {len(entries)} 个文件：{destination}")
     return destination
 
 

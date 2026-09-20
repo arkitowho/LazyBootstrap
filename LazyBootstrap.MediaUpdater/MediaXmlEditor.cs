@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -47,7 +48,8 @@ internal static class MediaXmlEditor
         }
     }
 
-    public static byte[] Apply(byte[] bytes, MediaUpdateOperation operation, CancellationToken cancel = default)
+    public static byte[] Apply(byte[] bytes, MediaUpdateOperation operation, CancellationToken cancel = default,
+        Action<int, MediaXmlEdit> skipped = null)
     {
         int index = 0;
         try
@@ -60,6 +62,7 @@ internal static class MediaXmlEditor
             var namespaces = CreateNamespaces(document.NameTable, operation);
             string newline = DetectNewline(original);
             bool finalNewline = original.EndsWith('\n') || original.EndsWith('\r');
+            bool changed = false;
             foreach (var edit in operation.Edits)
             {
                 cancel.ThrowIfCancellationRequested();
@@ -70,19 +73,25 @@ internal static class MediaXmlEditor
                 XmlNode target = matches[0]!;
                 if (target is XmlAttribute namespaceAttribute && IsNamespaceDeclaration(namespaceAttribute))
                     throw new IOException("不能通过属性操作修改 XML 命名空间声明。");
+                bool editChanged = false;
                 switch (edit.Action)
                 {
                     case "setValue":
-                        SetValue(document, target, edit.Value);
+                        editChanged = SetValue(document, target, edit.Value);
                         break;
                     case "addAttribute":
                     {
                         var element = RequireElement(target);
                         var (prefix, local, uri) = ResolveAttributeName(edit.Name, namespaces);
-                        if (element.HasAttribute(local, uri)) throw new IOException("同名属性已存在，新增操作不会覆盖它。");
+                        if (element.HasAttribute(local, uri))
+                        {
+                            if (element.GetAttribute(local, uri) == edit.Value) break;
+                            throw new IOException("同名属性已存在且值不同，新增操作不会覆盖它。");
+                        }
                         var addedAttribute = document.CreateAttribute(prefix, local, uri);
                         addedAttribute.Value = edit.Value;
                         element.Attributes.Append(addedAttribute);
+                        editChanged = true;
                         break;
                     }
                     case "remove":
@@ -94,6 +103,7 @@ internal static class MediaXmlEditor
                             if (CanFormat(parent) && IsIndentation(element.PreviousSibling)) parent.RemoveChild(element.PreviousSibling!);
                             parent.RemoveChild(element);
                         }
+                        editChanged = true;
                         break;
                     case "replaceElement":
                     case "appendChild":
@@ -102,12 +112,20 @@ internal static class MediaXmlEditor
                     {
                         var element = RequireElement(target);
                         var inserted = (XmlElement)document.ImportNode(ParseFragment(edit.Xml), true);
+                        if (AlreadyPresent(element, inserted, edit.Action, cancel)) break;
                         Insert(element, inserted, edit.Action, newline);
+                        editChanged = true;
                         break;
                     }
                     default: throw new IOException("未知 XML 编辑动作。");
                 }
+                if (editChanged) changed = true;
+                else skipped?.Invoke(index, edit);
             }
+
+            // An identical edit must not normalize formatting, touch timestamps, or require write access.
+            cancel.ThrowIfCancellationRequested();
+            if (!changed) return bytes;
 
             var settings = new XmlWriterSettings
             {
@@ -204,11 +222,17 @@ internal static class MediaXmlEditor
     private static XmlElement RequireElement(XmlNode node) => node as XmlElement ?? throw new IOException("此动作需要元素节点，不能操作文档、文本或其他节点。");
     private static bool IsNamespaceDeclaration(XmlAttribute attribute) => attribute.NamespaceURI == XmlnsNamespace || attribute.Name == "xmlns" || attribute.Prefix == "xmlns";
 
-    private static void SetValue(XmlDocument document, XmlNode target, string value)
+    private static bool SetValue(XmlDocument document, XmlNode target, string value)
     {
-        if (target is XmlAttribute attribute) { attribute.Value = value; return; }
+        if (target is XmlAttribute attribute)
+        {
+            if (attribute.Value == value) return false;
+            attribute.Value = value;
+            return true;
+        }
         var element = RequireElement(target);
         if (element.ChildNodes.OfType<XmlElement>().Any()) throw new IOException("setValue 只能修改叶元素，不能清空子元素。");
+        if (element.InnerText == value) return false;
         XmlNode[] textNodes = element.ChildNodes.Cast<XmlNode>().Where(n => n.NodeType is XmlNodeType.Text or XmlNodeType.CDATA or XmlNodeType.Whitespace or XmlNodeType.SignificantWhitespace).ToArray();
         var replacement = document.CreateTextNode(value);
         if (textNodes.Length == 0) element.PrependChild(replacement);
@@ -217,6 +241,78 @@ internal static class MediaXmlEditor
             element.ReplaceChild(replacement, textNodes[0]);
             foreach (var text in textNodes.Skip(1)) element.RemoveChild(text);
         }
+        return true;
+    }
+
+    private static bool AlreadyPresent(XmlElement target, XmlElement inserted, string action, CancellationToken cancel)
+    {
+        if (action == "replaceElement") return Equivalent(target, inserted, cancel);
+        // Search only direct children, or siblings on the requested side of the anchor.
+        // This also handles multiple insertions after the same anchor in one edit list.
+        if (action != "appendChild") RequireElement(target.ParentNode);
+        for (XmlNode candidate = action == "appendChild" ? target.FirstChild
+                 : action == "insertBefore" ? target.PreviousSibling : target.NextSibling;
+             candidate != null;
+             candidate = action == "insertBefore" ? candidate.PreviousSibling : candidate.NextSibling)
+        {
+            cancel.ThrowIfCancellationRequested();
+            if (candidate is XmlElement element && Equivalent(element, inserted, cancel)) return true;
+        }
+        return false;
+    }
+
+    private static bool Equivalent(XmlElement left, XmlElement right, CancellationToken cancel)
+    {
+        var pending = new Stack<(XmlNode Left, XmlNode Right)>();
+        pending.Push((left, right));
+        while (pending.TryPop(out var pair))
+        {
+            cancel.ThrowIfCancellationRequested();
+            if (pair.Left is XmlElement a && pair.Right is XmlElement b)
+            {
+                if (a.LocalName != b.LocalName || a.NamespaceURI != b.NamespaceURI) return false;
+                var attributes = a.Attributes.Cast<XmlAttribute>().Where(attr => !IsNamespaceDeclaration(attr)).ToArray();
+                if (attributes.Length != b.Attributes.Cast<XmlAttribute>().Count(attr => !IsNamespaceDeclaration(attr))) return false;
+                foreach (var attribute in attributes)
+                {
+                    cancel.ThrowIfCancellationRequested();
+                    var other = b.GetAttributeNode(attribute.LocalName, attribute.NamespaceURI);
+                    if (other == null || other.Value != attribute.Value) return false;
+                }
+                // Formatting added by Insert is not content. Preserve whitespace in leaves,
+                // mixed content and xml:space=preserve, and compare comments/PI in order.
+                bool ignoreIndent = CanFormat(a) && CanFormat(b)
+                    && a.ChildNodes.OfType<XmlElement>().Any() && b.ChildNodes.OfType<XmlElement>().Any();
+                var ac = ComparisonChildren(a, ignoreIndent, cancel);
+                var bc = ComparisonChildren(b, ignoreIndent, cancel);
+                if (ac.Count != bc.Count) return false;
+                for (int i = 0; i < ac.Count; i++) pending.Push((ac[i], bc[i]));
+            }
+            else if (pair.Left.NodeType != pair.Right.NodeType || pair.Left.Name != pair.Right.Name || pair.Left.Value != pair.Right.Value)
+                return false;
+        }
+        return true;
+    }
+
+    private static List<XmlNode> ComparisonChildren(XmlElement parent, bool ignoreIndent, CancellationToken cancel)
+    {
+        var result = new List<XmlNode>();
+        var text = new StringBuilder();
+        foreach (XmlNode child in parent.ChildNodes)
+        {
+            cancel.ThrowIfCancellationRequested();
+            if (ignoreIndent && IsIndentation(child)) continue;
+            if (child.NodeType is XmlNodeType.Text or XmlNodeType.CDATA or XmlNodeType.Whitespace or XmlNodeType.SignificantWhitespace)
+                text.Append(child.Value);
+            else
+            {
+                if (text.Length > 0) result.Add(parent.OwnerDocument!.CreateTextNode(text.ToString()));
+                text.Clear();
+                result.Add(child);
+            }
+        }
+        if (text.Length > 0) result.Add(parent.OwnerDocument!.CreateTextNode(text.ToString()));
+        return result;
     }
 
     private static bool CanFormat(XmlElement element)

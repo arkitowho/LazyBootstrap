@@ -23,7 +23,7 @@ internal sealed class MediaUpdatePlan
     private readonly string _package;
     private readonly CancellationToken _cancel;
 
-    public MediaUpdatePlan(string game, string package, CancellationToken cancel)
+    public MediaUpdatePlan(string game, string package, CancellationToken cancel, MediaUpdateLog log = null)
     {
         _game = game;
         _cancel = cancel;
@@ -48,8 +48,11 @@ internal sealed class MediaUpdatePlan
         // The pending replacement is an internal target, never a package-controlled path.
         Load(MediaUpdateSecurity.PendingPath, Destination(MediaUpdateSecurity.PendingPath), false);
         After = new Dictionary<string, MediaUpdateNode>(Before, StringComparer.OrdinalIgnoreCase);
+        var xmlTargets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        int operationIndex = 0;
         foreach (var op in manifest.Operations)
         {
+            operationIndex++;
             _cancel.ThrowIfCancellationRequested();
             string target = MediaUpdateSecurity.ValidateRelativePath(op.Target);
             try
@@ -57,11 +60,14 @@ internal sealed class MediaUpdatePlan
                 if (op.Type == "delete") Remove(target);
                 else if (op.Type == "editXml")
                 {
+                    xmlTargets.Add(target);
                     if (!After.TryGetValue(target, out var node) || node.IsDirectory)
                         throw new MediaUpdateException(target, "未找到待修改 XML 文件。", null, "未找到待修改 XML 文件：" + target);
                     byte[] originalText = node.Content ?? File.ReadAllBytes(node.Source);
                     _cancel.ThrowIfCancellationRequested();
-                    After[target] = node with { Content = MediaXmlEditor.Apply(originalText, op, _cancel) };
+                    byte[] edited = MediaXmlEditor.Apply(originalText, op, _cancel, log == null ? null : (index, edit) =>
+                        log.Write($"XML edit skipped: phase=preflight operation={operationIndex} path={target} edit={index} action={edit.Action} xpath={edit.XPath.Replace("\r", "\\r").Replace("\n", "\\n")} reason=already-identical"));
+                    if (!ReferenceEquals(edited, originalText)) After[target] = node with { Content = edited };
                 }
                 else
                 {
@@ -79,6 +85,13 @@ internal sealed class MediaUpdatePlan
             }
             catch (Exception ex) when ((ex is IOException or UnauthorizedAccessException) && ex is not MediaUpdateException)
             { throw new MediaUpdateException(target, ex.Message, ex); }
+        }
+        // Decide at the end: a skipped XML edit does not skip an earlier copy or a later write/delete.
+        foreach (string target in xmlTargets.OrderBy(path => path, StringComparer.Ordinal))
+        {
+            _cancel.ThrowIfCancellationRequested();
+            if (Before.TryGetValue(target, out var before) && After.TryGetValue(target, out var after) && ReferenceEquals(before, after))
+                log?.Write($"XML file skipped: phase=preflight path={target} reason=no-changes");
         }
     }
 

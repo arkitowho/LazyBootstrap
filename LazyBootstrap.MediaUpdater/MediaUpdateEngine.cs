@@ -41,7 +41,7 @@ internal sealed class MediaUpdateEngine : IDisposable
         {
             log.Write($"Preflight started: game={game} package={package}");
             cancel.ThrowIfCancellationRequested();
-            var plan = new MediaUpdatePlan(game, package, cancel);
+            var plan = new MediaUpdatePlan(game, package, cancel, log);
             var engine = new MediaUpdateEngine(game, report, plan, progress, log);
             log.Write($"Installation plan generated: changes={engine._changes.Count}");
             engine.CheckAccess(plan, cancel);

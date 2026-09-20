@@ -13,6 +13,69 @@ internal static partial class UpdateRegression
 {
     private static void RunXmlTests()
     {
+        Test("XML 重复安装跳过完全一致的修改且不重写文件", root =>
+        {
+            var operation = Edit("contents/config.xml",
+                Value("/config/value", "new"),
+                new MediaXmlEdit { Action = "addAttribute", XPath = "/config", Name = "enabled", Value = "true" },
+                Fragment("replaceElement", "/config/replace", "<replace value='new'/>") ,
+                Fragment("appendChild", "/config", "<group><child value='1'/></group>"),
+                Fragment("insertBefore", "/config/anchor", "<before id='1'/>") ,
+                Fragment("insertBefore", "/config/anchor", "<before id='2'/>") ,
+                Fragment("insertAfter", "/config/anchor", "<after id='1'/>") ,
+                Fragment("insertAfter", "/config/anchor", "<after id='2'/>") );
+            var (game, staging) = Pack(root, operation);
+            Put(game, "contents/config.xml", "<config><value>old</value><replace/><anchor/></config>");
+            Seal(staging); Apply(game, staging);
+            string path = Path.Combine(game, "contents/config.xml");
+            byte[] installed = File.ReadAllBytes(path);
+            Check(ReferenceEquals(MediaXmlEditor.Apply(installed, operation), installed), "相同修改仍重新序列化了 XML");
+            DateTime timestamp = new(2020, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+            File.SetLastWriteTimeUtc(path, timestamp);
+            // A repeated no-op XML update only needs read access.
+            using (var readOnly = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read)) Apply(game, staging);
+            Check(File.ReadAllBytes(path).SequenceEqual(installed), "重复安装改变 XML 内容");
+            Check(File.GetLastWriteTimeUtc(path) == timestamp, "重复安装重写了 XML 文件");
+        });
+        Test("XML 相同比较兼容缩进、属性顺序、CDATA 和命名空间前缀", _ =>
+        {
+            string xml = "<config xmlns:p='urn:p'><p:item b='2' a='1'>\n  <p:child><![CDATA[value]]></p:child>\n</p:item></config>";
+            string fragment = "<q:item xmlns:q='urn:p' a='1' b='2'><q:child>value</q:child></q:item>";
+            Check(TransformXml(xml, Fragment("appendChild", "/config", fragment)) == xml, "语义相同的元素重复追加");
+            string unchanged = "<config enabled='true'><value><![CDATA[same]]><!--keep--><?keep yes?></value></config>";
+            Check(TransformXml(unchanged, Value("/config/@enabled", "true"), Value("/config/value", "same"),
+                new MediaXmlEdit { Action = "addAttribute", XPath = "/config", Name = "enabled", Value = "true" }) == unchanged,
+                "相同文本或属性改变了原格式");
+        });
+        Test("XML 只在指定父节点及锚点对应方向查找重复内容", _ =>
+        {
+            var root = XDocument.Parse(TransformXml("<config><same/><anchor/><nested><child/></nested></config>",
+                Fragment("insertAfter", "/config/anchor", "<same/>"), Fragment("appendChild", "/config", "<child/>"))).Root!;
+            Check(root.Elements("same").Count() == 2 && root.Elements("child").Count() == 1, "错误地将其他位置视为已插入");
+            string xml = "<config><anchor/><same/></config>";
+            string once = TransformXml(xml, Fragment("insertBefore", "/config/anchor", "<same/>"));
+            Check(XDocument.Parse(once).Root!.Elements("same").Count() == 2, "前方插入误匹配后方元素");
+            Check(TransformXml(once, Fragment("insertBefore", "/config/anchor", "<same/>")) == once, "重复前方插入没有跳过");
+        });
+        Test("XML 部分相似的元素不能误判完全一致", _ =>
+        {
+            foreach (var pair in new (string Existing, string Fragment)[]
+            {
+                ("<item id='x' value='old'/>", "<item id='x' value='new'/>"),
+                ("<item extra='1'/>", "<item/>"), ("<item xmlns='urn:a'/>", "<item xmlns='urn:b'/>"),
+                ("<item><a/><b/></item>", "<item><b/><a/></item>"),
+                ("<item><!--old--></item>", "<item><!--new--></item>"),
+                ("<item><?mode old?></item>", "<item><?mode new?></item>"),
+                ("<item> </item>", "<item/>"),
+                ("<item>left<a/> right</item>", "<item>left<a/>right</item>"),
+                ("<item xml:space='preserve'> <a/> </item>", "<item xml:space='preserve'><a/></item>")
+            })
+            {
+                string result = TransformXml("<config>" + pair.Existing + "</config>", Fragment("appendChild", "/config", pair.Fragment));
+                Check(XDocument.Parse(result).Root!.Elements().Count() == 2, "不同内容被跳过：" + pair.Existing);
+            }
+        });
+
         Test("大量 XML 编辑可取消且取消不会包装成 XML 错误", _ =>
         {
             byte[] bytes = Encoding.UTF8.GetBytes("<config><value>old</value></config>");

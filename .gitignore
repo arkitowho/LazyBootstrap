@@ -19,6 +19,10 @@ build/
 build_tmp/
 publish/
 
+# Python tool caches
+__pycache__/
+*.py[cod]
+
 # Logs and transient files
 *.log
 *.tmp

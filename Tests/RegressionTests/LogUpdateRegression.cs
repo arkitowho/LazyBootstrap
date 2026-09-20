@@ -23,6 +23,55 @@ internal static partial class UpdateRegression
 
     private static void RunLogTests()
     {
+        Test("XML 完全一致时记录逐步跳过及单次文件跳过", root =>
+        {
+            var (game, package) = Pack(root,
+                Edit("contents/中文.xml", Value("/config/value", "same"), Value("/config/@enabled", "true"),
+                    new MediaXmlEdit { Action = "addAttribute", XPath = "/config", Name = "enabled", Value = "true" },
+                    Fragment("replaceElement", "/config/value", "<value>same</value>"),
+                    Fragment("appendChild", "/config", "<group><child/></group>"),
+                    Fragment("insertBefore", "/config/anchor", "<before/>"),
+                    Fragment("insertAfter", "/config/anchor", "<after/>")),
+                Edit("contents/中文.xml", Value("/config/value", "same")));
+            string original = "<config enabled='true'><value>same</value><before/><anchor/><after/><group><child/></group></config>";
+            Put(game, "contents/中文.xml", original); Seal(package);
+            var messages = new List<string>();
+            using (var engine = MediaUpdateEngine.Prepare(game, package, messages.Add)) engine.Apply();
+            string log = ReadUpdateLog(game);
+            Check(log.Split('\n').Count(line => line.StartsWith("XML edit skipped:")) == 8, "逐步跳过缺失或重复");
+            for (int edit = 1; edit <= 7; edit++)
+                Check(log.Contains($"operation=1 path=contents/中文.xml edit={edit} action="), "跳过日志缺少编辑序号");
+            Check(log.Contains("operation=2 path=contents/中文.xml edit=1 action=setValue xpath=/config/value reason=already-identical"), "跳过日志缺少动作、XPath 或原因");
+            SingleLogEvent(log, "XML file skipped");
+            Check(log.Contains("XML file skipped: phase=preflight path=contents/中文.xml reason=no-changes"), "文件跳过缺少路径或原因");
+            Check(log.Contains("completed=0 total=0") && !log.Contains("Installing "), "跳过的文件仍被计为写入");
+            Check(messages.All(message => !message.Contains("XML edit skipped") && !message.Contains("XML file skipped")), "内部日志混入界面回调");
+            Equal(game, "contents/中文.xml", original); NoUpdateUiInLog(log);
+        });
+
+        foreach (string other in new[] { "copy-before", "copy-after", "xml-after", "delete-after" })
+        Test("XML 步骤跳过不误报整个文件跳过：" + other, root =>
+        {
+            var skip = Edit("contents/config.xml", Value("/config/@value", "same"));
+            var copy = Copy("source/config.xml", "contents/config.xml");
+            var operations = other switch
+            {
+                "copy-before" => new[] { copy, skip },
+                "copy-after" => new[] { skip, copy },
+                "xml-after" => new[] { Edit("contents/config.xml", Value("/config/@value", "same"), Value("/config/@value", "new")) },
+                _ => new[] { skip, new MediaUpdateOperation { Type = "delete", Target = "contents/config.xml" } }
+            };
+            var (game, package) = Pack(root, operations);
+            Put(game, "contents/config.xml", "<config value='same'/>");
+            Put(package, "source/config.xml", "<config value='same' copied='true'/>"); Seal(package);
+            using (var engine = MediaUpdateEngine.Prepare(game, package)) engine.Apply();
+            string log = ReadUpdateLog(game);
+            SingleLogEvent(log, "XML edit skipped");
+            Check(!log.Contains("XML file skipped:"), "文件还有其他变更却记录了整文件跳过");
+            Check(log.Contains("completed=1 total=1"), "其他变更未正常安装");
+            NoUpdateUiInLog(log);
+        });
+
         Test("正常日志仅含内部步骤且逐项安装不重复", root =>
         {
             var (game, package) = Pack(root, Copy("source/中文.bin", "contents/中文.bin"));
