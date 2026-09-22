@@ -1271,12 +1271,17 @@ namespace LazyBootstrap.UI
         private Task LoadSettingsStateAsync(SettingsState settings)
         {
             _logger.LogInformation("Settings startup initialization started.");
-            settings.NoAsphyxia = _appConfig.ReadBool(AppConfigBootstrapper.SettingSectionName, "noasphyxia", false);
-            settings.AutoLaunch = _appConfig.ReadBool(AppConfigBootstrapper.SettingSectionName, AutoLaunchConfigKey, false);
-            settings.StartWithWindows = _windowsStartupService.IsEnabled(_paths.GetLauncherExecutablePath());
-            settings.DisableSpiceFso = _appConfig.ReadBool(AppConfigBootstrapper.SettingSectionName, DisableFsoConfigKey, false);
-            settings.UseSystemSpiceConfig = _appConfig.ReadBool(AppConfigBootstrapper.SettingSectionName, UseSystemConfigKey, false);
-            settings.GpuCompatLayerRenderMode = GpuCompatLayerConfigurator.NormalizeRenderMode(_appConfig.ReadString(AppConfigBootstrapper.SettingSectionName, "cl-rendermode", "dx9on12"));
+            settings.NoAsphyxia = _appConfig.ReadBool(AppConfigDefaults.SettingSectionName, "noasphyxia", false);
+            settings.AutoLaunch = _appConfig.ReadBool(AppConfigDefaults.SettingSectionName, AutoLaunchConfigKey, false);
+            try { settings.StartWithWindows = _windowsStartupService.IsEnabled(_paths.GetOuterLauncherExecutablePath()); }
+            catch (FileNotFoundException ex)
+            {
+                settings.StartWithWindows = false;
+                _logger.LogWarning(ex, "Outer Launcher is unavailable for Windows startup.");
+            }
+            settings.DisableSpiceFso = _appConfig.ReadBool(AppConfigDefaults.SettingSectionName, DisableFsoConfigKey, false);
+            settings.UseSystemSpiceConfig = _appConfig.ReadBool(AppConfigDefaults.SettingSectionName, UseSystemConfigKey, false);
+            settings.GpuCompatLayerRenderMode = GpuCompatLayerConfigurator.NormalizeRenderMode(_appConfig.ReadString(AppConfigDefaults.SettingSectionName, "cl-rendermode", "dx9on12"));
             settings.IsSpiceConfigAvailable = IsSpiceConfigAvailable(settings.UseSystemSpiceConfig);
             settings.SpiceConfigEmptyStateMessage = MissingSpiceConfigMessage;
             RefreshGpuCompatLayerState(settings);
@@ -1291,7 +1296,13 @@ namespace LazyBootstrap.UI
             ArgumentNullException.ThrowIfNull(settings);
 
             bool previousValue = settings.StartWithWindows;
-            string executablePath = _paths.GetLauncherExecutablePath();
+            string executablePath;
+            try { executablePath = requestedValue ? _paths.GetOuterLauncherExecutablePath() : string.Empty; }
+            catch (FileNotFoundException ex)
+            {
+                ShowErrorToast("开机自启动设置失败", ex.Message);
+                return Task.CompletedTask;
+            }
             if (_windowsStartupService.TrySetEnabled(executablePath, requestedValue, out var error))
             {
                 settings.StartWithWindows = requestedValue;
@@ -1369,22 +1380,25 @@ namespace LazyBootstrap.UI
         {
             try
             {
-                _appConfig.WriteString(AppConfigBootstrapper.SettingSectionName, "noasphyxia", settings.NoAsphyxia.ToString().ToLowerInvariant());
-                _appConfig.WriteString(AppConfigBootstrapper.SettingSectionName, AutoLaunchConfigKey, settings.AutoLaunch.ToString().ToLowerInvariant());
+                _appConfig.WriteString(AppConfigDefaults.SettingSectionName, "noasphyxia", settings.NoAsphyxia.ToString().ToLowerInvariant());
+                _appConfig.WriteString(AppConfigDefaults.SettingSectionName, AutoLaunchConfigKey, settings.AutoLaunch.ToString().ToLowerInvariant());
                 _logger.LogInformation("Launcher settings persisted.");
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to persist launcher settings.");
                 ShowErrorToast("保存设置失败", ex.Message);
-                settings.NoAsphyxia = _appConfig.ReadBool(AppConfigBootstrapper.SettingSectionName, "noasphyxia", false);
-                settings.AutoLaunch = _appConfig.ReadBool(AppConfigBootstrapper.SettingSectionName, AutoLaunchConfigKey, false);
+                TryReloadConfigAfterSaveFailure(() =>
+                {
+                    settings.NoAsphyxia = _appConfig.ReadBool(AppConfigDefaults.SettingSectionName, "noasphyxia", false);
+                    settings.AutoLaunch = _appConfig.ReadBool(AppConfigDefaults.SettingSectionName, AutoLaunchConfigKey, false);
+                });
             }
 
             return Task.CompletedTask;
         }
 
-        private Task PersistServerEndpointAsync(SettingsState settings)
+        private Task<bool> PersistServerEndpointAsync(SettingsState settings)
         {
             ArgumentNullException.ThrowIfNull(settings);
             _logger.LogInformation("Server endpoint persistence started.");
@@ -1400,13 +1414,13 @@ namespace LazyBootstrap.UI
                     new SpiceOptionUpdate("p", settings.PcbId, false)))
             {
                 ReloadRuntimeState(settings);
-                return Task.CompletedTask;
+                return Task.FromResult(false);
             }
 
             SyncSelectedServerPresetFromCurrentFields(settings);
-            SaveServerPresets(settings);
+            if (!SaveServerPresets(settings)) return Task.FromResult(false);
             _logger.LogInformation("Server endpoint persistence completed.");
-            return Task.CompletedTask;
+            return Task.FromResult(true);
         }
 
         private IReadOnlyList<NetworkAdapterOption> GetNetworkAdapterChoices(SettingsState settings)
@@ -1447,7 +1461,7 @@ namespace LazyBootstrap.UI
             try
             {
                 _appConfig.WriteString(
-                    AppConfigBootstrapper.SettingSectionName,
+                    AppConfigDefaults.SettingSectionName,
                     DisableFsoConfigKey,
                     settings.DisableSpiceFso.ToString().ToLowerInvariant());
             }
@@ -1455,7 +1469,7 @@ namespace LazyBootstrap.UI
             {
                 _logger.LogError(ex, "Failed to persist FSO setting.");
                 ShowErrorToast("保存设置失败", ex.Message);
-                settings.DisableSpiceFso = _appConfig.ReadBool(AppConfigBootstrapper.SettingSectionName, DisableFsoConfigKey, false);
+                TryReloadConfigAfterSaveFailure(() => settings.DisableSpiceFso = _appConfig.ReadBool(AppConfigDefaults.SettingSectionName, DisableFsoConfigKey, false));
                 return Task.CompletedTask;
             }
 
@@ -1479,7 +1493,7 @@ namespace LazyBootstrap.UI
             settings.DisableSpiceFso = actualDisabled;
             try
             {
-                _appConfig.WriteString(AppConfigBootstrapper.SettingSectionName, DisableFsoConfigKey, actualDisabled.ToString().ToLowerInvariant());
+                _appConfig.WriteString(AppConfigDefaults.SettingSectionName, DisableFsoConfigKey, actualDisabled.ToString().ToLowerInvariant());
             }
             catch (Exception ex)
             {
@@ -1569,13 +1583,6 @@ namespace LazyBootstrap.UI
             ArgumentNullException.ThrowIfNull(settings);
             _logger.LogInformation("spicecfg editor launch requested.");
 
-            if (_appConfig.IsReadOnlySession)
-            {
-                _logger.LogWarning("spicecfg editor launch skipped because config.toml is in a read-only session.");
-                ShowWarningToast("配置文件无法保存", "config.toml 当前无法读取，本次会话的配置修改仅保存在内存中。");
-                return;
-            }
-
             string spicePath = _paths.GetSpicePath();
 
             if (!File.Exists(spicePath))
@@ -1657,7 +1664,7 @@ namespace LazyBootstrap.UI
             try
             {
                 _appConfig.WriteString(
-                    AppConfigBootstrapper.SettingSectionName,
+                    AppConfigDefaults.SettingSectionName,
                     UseSystemConfigKey,
                     settings.UseSystemSpiceConfig.ToString().ToLowerInvariant());
                 ReloadRuntimeState(settings);
@@ -1667,7 +1674,7 @@ namespace LazyBootstrap.UI
             {
                 _logger.LogError(ex, "Failed to persist use-system-config.");
                 ShowErrorToast("保存设置失败", ex.Message);
-                settings.UseSystemSpiceConfig = _appConfig.ReadBool(AppConfigBootstrapper.SettingSectionName, UseSystemConfigKey, false);
+                TryReloadConfigAfterSaveFailure(() => settings.UseSystemSpiceConfig = _appConfig.ReadBool(AppConfigDefaults.SettingSectionName, UseSystemConfigKey, false));
             }
 
             return Task.CompletedTask;
@@ -1767,7 +1774,7 @@ namespace LazyBootstrap.UI
 
             settings.ServerPresets.Add(newPreset);
             settings.SelectedServerPreset = newPreset;
-            await PersistSelectedServerPresetAsync(settings);
+            if (!await PersistSelectedServerPresetAsync(settings)) return;
             _logger.LogInformation("Server preset added. PresetCount={PresetCount}", settings.ServerPresets.Count);
             ShowInfoToast("新建预设", $"已创建预设：{presetName}");
         }
@@ -1807,12 +1814,12 @@ namespace LazyBootstrap.UI
                 ?? settings.ServerPresets.FirstOrDefault();
 
             settings.SelectedServerPreset = fallback;
-            await PersistSelectedServerPresetAsync(settings);
+            if (!await PersistSelectedServerPresetAsync(settings)) return;
             _logger.LogInformation("Server preset deleted. PresetCount={PresetCount}", settings.ServerPresets.Count);
             ShowInfoToast("删除预设", $"已删除预设：{preset.Name}");
         }
 
-        private async Task PersistSelectedServerPresetAsync(SettingsState settings)
+        private async Task<bool> PersistSelectedServerPresetAsync(SettingsState settings)
         {
             ArgumentNullException.ThrowIfNull(settings);
             _logger.LogInformation("Selected server preset persistence started.");
@@ -1821,7 +1828,7 @@ namespace LazyBootstrap.UI
             if (preset == null)
             {
                 _logger.LogWarning("Selected server preset persistence skipped because no preset is selected.");
-                return;
+                return false;
             }
 
             settings.ActiveServerPreset = preset.Name ?? NonePresetName;
@@ -1836,18 +1843,14 @@ namespace LazyBootstrap.UI
                 settings.PcbId = (preset.PcbId ?? string.Empty).Trim();
             }
 
-            await PersistServerEndpointAsync(settings);
+            if (!await PersistServerEndpointAsync(settings)) return false;
             _logger.LogInformation("Selected server preset persistence completed.");
+            return true;
         }
 
         private void LoadServerPresets(SettingsState settings)
         {
             var result = _appConfig.LoadServerPresets(NonePresetName, AsphyxiaPresetName, AsphyxiaDefaultUrl);
-            if (result.Mutated)
-            {
-                _appConfig.SaveServerPresets(result.Presets, result.ActivePreset, NonePresetName);
-            }
-
             settings.ServerPresets.Clear();
             foreach (var preset in result.Presets)
             {
@@ -1898,7 +1901,7 @@ namespace LazyBootstrap.UI
         private void RefreshGpuCompatLayerState(SettingsState settings)
         {
             var runtimeState = GetGpuCompatLayerRuntimeState();
-            var configuredRenderMode = SyncGpuCompatLayerConfigToRuntimeState(runtimeState);
+            var configuredRenderMode = GpuCompatLayerConfigurator.NormalizeRenderMode(settings.GpuCompatLayerRenderMode);
 
             settings.GpuCompatLayerRenderMode = string.IsNullOrWhiteSpace(runtimeState.DetectedRenderMode)
                 ? configuredRenderMode
@@ -2147,44 +2150,25 @@ namespace LazyBootstrap.UI
             }
         }
 
-        private string SyncGpuCompatLayerConfigToRuntimeState(GpuCompatLayerRuntimeState runtimeState)
+        private void TryReloadConfigAfterSaveFailure(Action reload)
         {
-            var configuredRenderMode = GpuCompatLayerConfigurator.NormalizeRenderMode(
-                _appConfig.ReadString(AppConfigBootstrapper.SettingSectionName, "cl-rendermode", "dx9on12"));
-            var detectedRenderMode = string.IsNullOrWhiteSpace(runtimeState.DetectedRenderMode)
-                ? string.Empty
-                : GpuCompatLayerConfigurator.NormalizeRenderMode(runtimeState.DetectedRenderMode);
-            var targetCompatEnabled = runtimeState.IsFullyApplied;
+            try { reload(); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Config remains unavailable after failed save."); }
+        }
 
+        private bool SaveServerPresets(SettingsState settings)
+        {
             try
             {
-                var currentCompatEnabled = _appConfig.ReadBool(AppConfigBootstrapper.SettingSectionName, "compatlayer", false);
-                if (currentCompatEnabled != targetCompatEnabled)
-                {
-                    _appConfig.WriteString(
-                        AppConfigBootstrapper.SettingSectionName,
-                        "compatlayer",
-                        targetCompatEnabled ? "true" : "false");
-                }
-
-                if (!string.IsNullOrWhiteSpace(detectedRenderMode)
-                    && !string.Equals(configuredRenderMode, detectedRenderMode, StringComparison.OrdinalIgnoreCase))
-                {
-                    _appConfig.WriteString(AppConfigBootstrapper.SettingSectionName, "cl-rendermode", detectedRenderMode);
-                    configuredRenderMode = detectedRenderMode;
-                }
+                _appConfig.SaveServerPresets(settings.ServerPresets, settings.ActiveServerPreset, NonePresetName);
+                return true;
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to sync compatibility runtime state back to config.toml.");
+                _logger.LogError(ex, "Failed to save server presets.");
+                ShowErrorToast("保存预设失败", ex.Message);
+                return false;
             }
-
-            return configuredRenderMode;
-        }
-
-        private void SaveServerPresets(SettingsState settings)
-        {
-            _appConfig.SaveServerPresets(settings.ServerPresets, settings.ActiveServerPreset, NonePresetName);
         }
 
         private bool TryApplySpiceUpdates(

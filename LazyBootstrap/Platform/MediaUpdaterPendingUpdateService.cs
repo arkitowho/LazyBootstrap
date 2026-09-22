@@ -9,15 +9,15 @@ namespace LazyBootstrap.Platform
     {
         private const string MediaUpdaterFileName = "MediaUpdater.exe";
         private const string PendingExtension = ".pending";
-        private const string BackupExtension = ".bak";
+
         private const int MaxAttempts = 20;
         private static readonly TimeSpan RetryDelay = TimeSpan.FromMilliseconds(250);
 
-        public static void ApplyPendingUpdate(string applicationDirectoryPath)
+        public static bool ApplyPendingUpdate(string applicationDirectoryPath)
         {
             if (string.IsNullOrWhiteSpace(applicationDirectoryPath))
             {
-                return;
+                return false;
             }
 
             string applicationDirectory;
@@ -28,16 +28,15 @@ namespace LazyBootstrap.Platform
             catch (Exception ex)
             {
                 Log.Warning(ex, "MediaUpdater pending update skipped because the application directory is invalid.");
-                return;
+                return false;
             }
 
             string targetPath = Path.Combine(applicationDirectory, MediaUpdaterFileName);
             string pendingPath = targetPath + PendingExtension;
-            string backupPath = targetPath + BackupExtension;
 
             if (!File.Exists(pendingPath))
             {
-                return;
+                return true;
             }
 
             Log.Information("MediaUpdater pending update found: {PendingPath}", pendingPath);
@@ -46,9 +45,9 @@ namespace LazyBootstrap.Platform
             {
                 try
                 {
-                    ApplyPendingUpdateCore(targetPath, pendingPath, backupPath);
+                    File.Move(pendingPath, targetPath, true);
                     Log.Information("MediaUpdater pending update applied successfully.");
-                    return;
+                    return true;
                 }
                 catch (Exception ex) when (IsRetriableFileAccessError(ex) && attempt < MaxAttempts)
                 {
@@ -62,59 +61,10 @@ namespace LazyBootstrap.Platform
                 catch (Exception ex)
                 {
                     Log.Warning(ex, "MediaUpdater pending update failed. Pending file will be retried on next startup.");
-                    return;
+                    return false;
                 }
             }
-        }
-
-        private static void ApplyPendingUpdateCore(string targetPath, string pendingPath, string backupPath)
-        {
-            if (!File.Exists(pendingPath))
-            {
-                return;
-            }
-
-            SetNormalAttributesIfExists(pendingPath);
-            SetNormalAttributesIfExists(targetPath);
-            DeleteIfExists(backupPath);
-
-            if (File.Exists(targetPath))
-            {
-                File.Replace(pendingPath, targetPath, backupPath, true);
-                TryDeleteIfExists(backupPath);
-                return;
-            }
-
-            File.Move(pendingPath, targetPath, true);
-        }
-
-        private static void SetNormalAttributesIfExists(string path)
-        {
-            if (File.Exists(path))
-            {
-                File.SetAttributes(path, FileAttributes.Normal);
-            }
-        }
-
-        private static void DeleteIfExists(string path)
-        {
-            if (File.Exists(path))
-            {
-                File.SetAttributes(path, FileAttributes.Normal);
-                File.Delete(path);
-            }
-        }
-
-        private static void TryDeleteIfExists(string path)
-        {
-            try
-            {
-                DeleteIfExists(path);
-            }
-            catch (Exception ex)
-            {
-                Log.Debug(ex, "MediaUpdater replacement backup cleanup failed: {BackupPath}", path);
-            }
+            return false;
         }
 
         private static bool IsRetriableFileAccessError(Exception ex)

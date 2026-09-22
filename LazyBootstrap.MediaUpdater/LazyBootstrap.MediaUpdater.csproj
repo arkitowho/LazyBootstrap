@@ -24,9 +24,13 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="..\LazyBootstrap\FileSystem\DirectorySafety.cs" Link="FileSystem\DirectorySafety.cs" />
     <TrimmerRootAssembly Include="MediaUpdater" />
     <None Include="Assets\media-updater.png" />
     <None Include="Assets\media-updater.ico" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Compile Include="../LazyBootstrap/FileSystem/LauncherLocation.cs" Link="LauncherLocation.cs" />
+  </ItemGroup>
 </Project>

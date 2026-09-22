@@ -1,0 +1,9 @@
+{
+  "operations": [
+    {
+      "type": "copy",
+      "source": "source/assets",
+      "target": "contents/update-example"
+    }
+  ]
+}

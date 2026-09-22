@@ -130,25 +130,58 @@ namespace LazyBootstrap.Services
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(sourceDirectory);
             ArgumentException.ThrowIfNullOrWhiteSpace(destinationDirectory);
+            sourceDirectory = DirectorySafety.Normalize(sourceDirectory);
+            destinationDirectory = DirectorySafety.Normalize(destinationDirectory);
+            ValidateTransferPaths(sourceDirectory, destinationDirectory, isDirectory: true);
 
-            if (!Directory.Exists(sourceDirectory))
+            string parent = Path.GetDirectoryName(destinationDirectory);
+            Directory.CreateDirectory(parent);
+            string staging = Path.Combine(parent, ".savedata-staging-" + Guid.NewGuid().ToString("N"));
+            string backup = Path.Combine(parent, ".savedata-backup-" + Guid.NewGuid().ToString("N"));
+            bool movedOriginal = false;
+            try
             {
-                throw new DirectoryNotFoundException($"Source directory was not found: {sourceDirectory}");
-            }
+                // Finish all potentially failing reads before moving the original save out of the way.
+                CopyDirectoryRecursive(sourceDirectory, staging);
+                DirectorySafety.EnsureNoLinks(destinationDirectory);
+                if (Directory.Exists(destinationDirectory))
+                {
+                    Directory.Move(destinationDirectory, backup);
+                    movedOriginal = true;
+                }
 
-            EnsureDirectoryDeleted(destinationDirectory);
-            CopyDirectoryRecursive(sourceDirectory, destinationDirectory);
+                try
+                {
+                    Directory.Move(staging, destinationDirectory);
+                }
+                catch (Exception replacementError)
+                {
+                    if (movedOriginal)
+                    {
+                        try { Directory.Move(backup, destinationDirectory); }
+                        catch (Exception restoreError)
+                        {
+                            throw new IOException($"存档替换未完成，原存档已保留在：{backup}",
+                                new AggregateException(replacementError, restoreError));
+                        }
+                    }
+                    throw;
+                }
+
+                // A failed backup cleanup must not turn a successful replacement into data loss.
+                DeleteDirectoryIfExists(backup);
+            }
+            finally
+            {
+                DeleteDirectoryIfExists(staging);
+            }
         }
 
         public void CopyFile(string sourcePath, string destinationPath)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
             ArgumentException.ThrowIfNullOrWhiteSpace(destinationPath);
-
-            if (!File.Exists(sourcePath))
-            {
-                throw new FileNotFoundException("Source file was not found.", sourcePath);
-            }
+            ValidateTransferPaths(sourcePath, destinationPath, isDirectory: false);
 
             string destinationDirectory = Path.GetDirectoryName(destinationPath);
             if (!string.IsNullOrWhiteSpace(destinationDirectory))
@@ -163,24 +196,28 @@ namespace LazyBootstrap.Services
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(sourceDirectory);
             ArgumentException.ThrowIfNullOrWhiteSpace(destinationDirectory);
+            ValidateTransferPaths(sourceDirectory, destinationDirectory, isDirectory: true);
+            CopyDirectoryContents(sourceDirectory, destinationDirectory);
+        }
 
-            if (!Directory.Exists(sourceDirectory))
-            {
-                throw new DirectoryNotFoundException($"Source directory was not found: {sourceDirectory}");
-            }
-
+        private static void CopyDirectoryContents(string sourceDirectory, string destinationDirectory)
+        {
+            DirectorySafety.EnsureNoLinks(sourceDirectory);
+            DirectorySafety.EnsureNoLinks(destinationDirectory);
             Directory.CreateDirectory(destinationDirectory);
 
             foreach (var file in Directory.GetFiles(sourceDirectory))
             {
                 string destinationFile = Path.Combine(destinationDirectory, Path.GetFileName(file));
+                DirectorySafety.EnsureNoLinks(file);
+                DirectorySafety.EnsureNoLinks(destinationFile);
                 File.Copy(file, destinationFile, overwrite: true);
             }
 
             foreach (var directory in Directory.GetDirectories(sourceDirectory))
             {
                 string destinationSubDirectory = Path.Combine(destinationDirectory, Path.GetFileName(directory));
-                CopyDirectoryRecursive(directory, destinationSubDirectory);
+                CopyDirectoryContents(directory, destinationSubDirectory);
             }
         }
 
@@ -201,7 +238,13 @@ namespace LazyBootstrap.Services
 
         public void CopyEntries(IEnumerable<SavedataTransferEntry> entries)
         {
-            foreach (var entry in entries)
+            ArgumentNullException.ThrowIfNull(entries);
+            var transfers = entries.ToList();
+            // Reject the entire selection before copying even the first file.
+            foreach (var entry in transfers)
+                ValidateTransferPaths(entry.SourcePath, entry.DestinationPath, entry.IsDirectory);
+
+            foreach (var entry in transfers)
             {
                 if (entry.IsDirectory)
                 {
@@ -229,6 +272,7 @@ namespace LazyBootstrap.Services
 
             try
             {
+                DirectorySafety.EnsureTreeHasNoLinks(path);
                 Directory.Delete(path, recursive: true);
             }
             catch
@@ -271,25 +315,21 @@ namespace LazyBootstrap.Services
             entries.Add(new SavedataTransferEntry(id, displayName, sourcePath, destinationPath, string.Empty, isDirectory: false));
         }
 
-        private static void EnsureDirectoryDeleted(string path)
+        private static void ValidateTransferPaths(string source, string destination, bool isDirectory)
         {
-            if (!Directory.Exists(path))
+            DirectorySafety.EnsureSeparateTrees(source, destination);
+            if (isDirectory)
             {
-                return;
+                if (!Directory.Exists(source))
+                    throw new DirectoryNotFoundException($"未找到源目录：{source}");
+                DirectorySafety.EnsureTreeHasNoLinks(source);
+                DirectorySafety.EnsureTreeHasNoLinks(destination);
             }
-
-            try
+            else
             {
-                Directory.Delete(path, recursive: true);
-            }
-            catch (Exception ex) when (ex is IOException || ex is UnauthorizedAccessException)
-            {
-                throw new IOException($"Failed to replace existing directory: {path}", ex);
-            }
-
-            if (Directory.Exists(path))
-            {
-                throw new IOException($"Failed to replace existing directory: {path}");
+                if (!File.Exists(source)) throw new FileNotFoundException("未找到源文件。", source);
+                DirectorySafety.EnsureNoLinks(source);
+                DirectorySafety.EnsureNoLinks(destination);
             }
         }
     }

@@ -245,6 +245,8 @@ namespace LazyBootstrap.UI
                 return;
             }
 
+            bool wasEnabled = _displayState.IsDisplayConfigurationEnabled;
+            bool wasDualDisplay = _displayState.IsDualDisplay;
             try
             {
                 updateState?.Invoke();
@@ -254,6 +256,8 @@ namespace LazyBootstrap.UI
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Persist display configuration option failed.");
+                _displayState.IsDisplayConfigurationEnabled = wasEnabled;
+                _displayState.IsDualDisplay = wasDualDisplay;
                 ShowErrorToast("显示器配置失败", ex.Message);
                 ApplyDisplayStateToUi();
             }

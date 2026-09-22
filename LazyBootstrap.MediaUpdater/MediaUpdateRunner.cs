@@ -1,249 +1,153 @@
 using System;
 using System.Diagnostics;
 using System.IO;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using LazyBootstrap.FileSystem;
 
-namespace LazyBootstrap.MediaUpdate
+namespace LazyBootstrap.MediaUpdate;
+
+internal static class MediaUpdateRunner
 {
-    internal static class MediaUpdateRunner
+    internal const string SuccessMessage = "Update Successful!";
+
+    public static async Task<int> RunAsync(string game, string package, int parentPid, Action<string> report,
+        CancellationToken cancel = default, Action<MediaUpdateProgress> progress = null, string applicationDirectory = null)
     {
-        public const int ExitSecurityBlocked = 4;
-
-        public static async Task<int> RunAsync(
-            string gamePath,
-            string stagingPath,
-            Action<string> log,
-            CancellationToken cancellationToken = default,
-            Action onUpdateComplete = null,
-            Action<string> onSecurityBlockUi = null)
+        var state = new MediaUpdateProgress(MediaUpdateStage.Waiting, "正在等待启动器退出...");
+        void Publish(MediaUpdateProgress value)
         {
-            if (log == null)
+            state = value;
+            MediaUpdateProgress.Send(progress, value);
+        }
+        void Record(string message)
+        {
+            try { using var log = new MediaUpdateLog(game, true); log.Write(message); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        }
+        void Report(string message)
+        {
+            try { report?.Invoke(message); } catch { }
+        }
+        try
+        {
+            Record($"Parent wait started: pid={parentPid} timeoutSeconds=10 game={game} package={package}");
+            Report("正在等待启动器退出...");
+            Publish(state);
+            await WaitForParentAsync(parentPid, cancel);
+            Record($"Parent wait completed: pid={parentPid}");
+            await Task.Run(() =>
             {
-                throw new ArgumentNullException(nameof(log));
-            }
-
+                using var engine = MediaUpdateEngine.Prepare(game, package, report, cancel, Publish);
+                engine.Apply(cancel);
+            }, cancel);
+            // Only the fixed extraction directory is cleaned; old recovery material is left alone.
+            string staging = MediaUpdateProtocol.GetUpdateStagingDirectoryPath(game);
+            Report("正在清理更新临时目录...");
+            Publish(state with { Stage = MediaUpdateStage.Cleanup, Message = "正在清理更新临时目录...", Path = null, Operation = null });
             try
             {
-                gamePath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(gamePath));
-                stagingPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(stagingPath));
-
-                if (!MediaUpdateProtocol.IsValidGameRoot(gamePath))
+                if (DirectorySafety.IsWithin(package, staging) && Directory.Exists(staging))
                 {
-                    log("错误: 游戏目录中未找到 contents 或 asphyxia。");
-                    return 0;
+                    Record($"Cleanup started: path={staging}");
+                    Directory.Delete(staging, true);
+                    Record($"Cleanup completed: path={staging}");
                 }
-
-                string syncBat = MediaUpdateProtocol.FindShallowestFile(stagingPath, MediaUpdateProtocol.SyncBatchFileName);
-                if (string.IsNullOrEmpty(syncBat) || !File.Exists(syncBat))
-                {
-                    log($"错误: 在 staging 中未找到 {MediaUpdateProtocol.SyncBatchFileName}。");
-                    return 0;
-                }
-
-                if (!MediaUpdateSecurity.TryValidateStagingBatches(stagingPath, gamePath, out string securityError))
-                {
-                    string msg = securityError ?? MediaUpdateSecurity.BlockedNonGamePathMessage;
-                    if (onSecurityBlockUi != null)
-                    {
-                        onSecurityBlockUi(msg);
-                    }
-                    else
-                    {
-                        log(msg);
-                    }
-
-                    return ExitSecurityBlocked;
-                }
-
-                string syncDir = Path.GetDirectoryName(syncBat) ?? stagingPath;
-                string updaterLog = Path.Combine(gamePath, "updater_log.txt");
-
-                log("正在结束启动器…");
-                TryKillLauncher();
-                await Task.Delay(2000, cancellationToken).ConfigureAwait(true);
-
-                log("开始同步资源…");
-                int syncCode = await RunSyncBatchAsync(syncBat, syncDir, gamePath, log, cancellationToken).ConfigureAwait(true);
-                if (syncCode != 0)
-                {
-                    log("同步失败。退出代码: " + syncCode);
-                    if (File.Exists(updaterLog))
-                    {
-                        log("详见: " + updaterLog);
-                    }
-
-                    return 0;
-                }
-
-                string dataMods = Path.Combine(gamePath, "contents", "data_mods");
-                string cache = Path.Combine(dataMods, "_cache");
-                if (Directory.Exists(dataMods) && Directory.Exists(cache))
-                {
-                    log("正在清除 data_mods 缓存…");
-                    try
-                    {
-                        Directory.Delete(cache, true);
-                    }
-                    catch (Exception ex)
-                    {
-                        log("清理缓存时出现问题: " + ex.Message);
-                    }
-                }
-
-                log($"正在清理 {MediaUpdateProtocol.UpdateStagingFolderName}…");
-                try
-                {
-                    if (Directory.Exists(stagingPath))
-                    {
-                        Directory.Delete(stagingPath, true);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    log("清理临时目录时出现问题: " + ex.Message);
-                }
-
-                onUpdateComplete?.Invoke();
-
-                await Task.Delay(5000, cancellationToken).ConfigureAwait(true);
-
-                string gameLauncherPath = Path.Combine(gamePath, MediaUpdateProtocol.GameLauncherExeName);
-                string outerShellPath = Path.Combine(gamePath, MediaUpdateProtocol.LauncherProcessImageFileName);
-                if (!TryStartShellExe(gameLauncherPath, gamePath, log, MediaUpdateProtocol.GameLauncherExeName))
-                {
-                    if (!TryStartShellExe(outerShellPath, gamePath, log, MediaUpdateProtocol.LauncherProcessImageFileName))
-                    {
-                        log(
-                            $"未找到 {MediaUpdateProtocol.GameLauncherExeName} 与 {MediaUpdateProtocol.LauncherProcessImageFileName}，请从游戏根目录手动运行启动器。");
-                    }
-                }
-
-                return 0;
-            }
-            catch (OperationCanceledException)
-            {
-                log("已取消。");
+                else Record($"Cleanup skipped: path={staging} package={package}");
             }
             catch (Exception ex)
             {
-                log("错误: " + ex);
+                string warning = "更新成功，但解压目录清理失败：" + ex.Message;
+                Record(MediaUpdateLog.FormatFailure("Cleanup failed", ex, $"path={staging}"));
+                Report(warning);
+                Publish(state with { Warning = warning });
             }
-
+            Report(SuccessMessage);
+            // Installation is complete; cancellation must not turn success into an installation failure.
+            for (int seconds = 5; seconds > 0; seconds--)
+            {
+                Publish(state with { Stage = MediaUpdateStage.Completed, Status = MediaUpdateStatus.Succeeded,
+                    Message = SuccessMessage, RemainingSeconds = seconds });
+                await Task.Delay(1000);
+            }
+            Report("正在重新启动启动器。");
+            Publish(state with { Message = "正在重新启动启动器。", RemainingSeconds = 0 });
+            if (!StartLauncher(game, applicationDirectory ?? AppContext.BaseDirectory, message =>
+            {
+                Report(message);
+                Publish(state with { Warning = string.IsNullOrEmpty(state.Warning) ? message : state.Warning + "\n" + message,
+                    RemainingSeconds = null, RequiresAcknowledgement = true });
+            }, Record)) Publish(state with { Message = SuccessMessage });
             return 0;
         }
-
-        // Outer shell path is game root LazyBootstrap.exe, not launcher/LazyBootstrap.exe.
-        private static bool TryStartShellExe(string exePath, string workingDirectory, Action<string> log, string displayName)
+        catch (OperationCanceledException)
         {
-            if (string.IsNullOrEmpty(exePath) || !File.Exists(exePath))
-            {
-                return false;
-            }
+            const string message = "更新已取消，未进行安装。";
+            if (state.Status != MediaUpdateStatus.Cancelled)
+                Record($"Update cancelled: stage={state.Stage} pid={parentPid} completed={state.Completed} total={state.Total}");
+            Report(message);
+            Publish(state with { Status = MediaUpdateStatus.Cancelled, Message = message, Detail = null, RequiresAcknowledgement = true });
+            return 1;
+        }
+        catch (Exception ex)
+        {
+            if (state.Status is not (MediaUpdateStatus.Failed or MediaUpdateStatus.Cancelled))
+                Record(MediaUpdateLog.FormatFailure("Update failed", ex, $"stage={state.Stage} pid={parentPid}"));
+            Report(ex.Message);
+            Publish(state with { Status = state.Status == MediaUpdateStatus.Cancelled ? MediaUpdateStatus.Cancelled : MediaUpdateStatus.Failed,
+                Message = ex.Message, Detail = state.Status is MediaUpdateStatus.Failed or MediaUpdateStatus.Cancelled ? state.Detail : ex.Message,
+                RequiresAcknowledgement = true });
+            return 1;
+        }
+    }
 
-            try
+    internal static async Task WaitForParentAsync(int parentPid, CancellationToken cancel)
+    {
+        if (parentPid <= 0) throw new IOException("启动器进程 ID 无效。");
+        Process parent;
+        try { parent = Process.GetProcessById(parentPid); }
+        catch (ArgumentException) { return; }
+        using (parent)
+        using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancel))
+        {
+            timeout.CancelAfter(TimeSpan.FromSeconds(10));
+            try { await parent.WaitForExitAsync(timeout.Token); }
+            catch (OperationCanceledException) when (!cancel.IsCancellationRequested)
+            { throw new MediaUpdateException(null, $"Parent process {parentPid} did not exit within 10 seconds.", null,
+                "启动器在 10 秒内未退出，未进行安装。请关闭启动器后重试。"); }
+        }
+    }
+
+    internal static ProcessStartInfo CreateLauncherStartInfo(string game, string applicationDirectory)
+    {
+        string path = LauncherLocation.FindOuterLauncher(LauncherLocation.GetConfigurationDirectory(applicationDirectory));
+        var start = new ProcessStartInfo(path) { UseShellExecute = true, WorkingDirectory = Path.GetDirectoryName(path)! };
+        start.ArgumentList.Add("--basedir");
+        start.ArgumentList.Add(Path.GetFullPath(game));
+        return start;
+    }
+
+    private static bool StartLauncher(string game, string applicationDirectory, Action<string> report, Action<string> record)
+    {
+        try
+        {
+            record($"Launcher restart requested: applicationDirectory={applicationDirectory} game={game}");
+            var start = CreateLauncherStartInfo(game, applicationDirectory);
+            record($"Launcher process starting: executable={start.FileName} workingDirectory={start.WorkingDirectory} --basedir={Path.GetFullPath(game)}");
+            using var process = Process.Start(start);
+            if (process != null)
             {
-                var psi = new ProcessStartInfo
-                {
-                    FileName = exePath,
-                    WorkingDirectory = workingDirectory,
-                    UseShellExecute = true
-                };
-                Process.Start(psi);
+                record($"Launcher process started: pid={process.Id}");
                 return true;
             }
-            catch (Exception ex)
-            {
-                log("无法启动 " + displayName + ": " + ex.Message);
-                return false;
-            }
+            record("Launcher restart failed: Process.Start returned null.");
         }
-
-        private static void TryKillLauncher()
+        catch (Exception ex)
         {
-            try
-            {
-                string name = Path.GetFileNameWithoutExtension(MediaUpdateProtocol.LauncherProcessImageFileName);
-                foreach (var p in Process.GetProcessesByName(name))
-                {
-                    try
-                    {
-                        p.Kill();
-                    }
-                    catch
-                    {
-                    }
-                    finally
-                    {
-                        p.Dispose();
-                    }
-                }
-            }
-            catch
-            {
-            }
+            record(MediaUpdateLog.FormatFailure("Launcher restart failed", ex, $"applicationDirectory={applicationDirectory}"));
+            report("无法启动启动器：" + ex.Message);
         }
-
-        private static async Task<int> RunSyncBatchAsync(
-            string syncBatPath,
-            string workingDirectory,
-            string gamePath,
-            Action<string> log,
-            CancellationToken cancellationToken)
-        {
-            string cmd = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "cmd.exe");
-            var startInfo = new ProcessStartInfo
-            {
-                FileName = cmd,
-                WorkingDirectory = workingDirectory,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = false,
-                StandardOutputEncoding = Encoding.UTF8
-            };
-            startInfo.ArgumentList.Add("/c");
-            startInfo.ArgumentList.Add("call");
-            startInfo.ArgumentList.Add(syncBatPath);
-            startInfo.Environment[MediaUpdateProtocol.GamePathVariableName] = gamePath;
-            startInfo.Environment[MediaUpdateProtocol.SyncFromLauncherVariableName] = "1";
-
-            using var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
-
-            var sb = new StringBuilder(65536);
-            process.OutputDataReceived += (_, e) =>
-            {
-                if (e.Data == null)
-                {
-                    return;
-                }
-
-                sb.AppendLine(e.Data);
-            };
-
-            if (!process.Start())
-            {
-                return -1;
-            }
-
-            process.BeginOutputReadLine();
-            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(true);
-            string combined = sb.ToString();
-            if (combined.Length > 0)
-            {
-                const int max = 20000;
-                if (combined.Length > max)
-                {
-                    log(combined.Substring(0, max) + "…(truncated)");
-                }
-                else
-                {
-                    log(combined.TrimEnd());
-                }
-            }
-
-            return process.ExitCode;
-        }
+        report("请手动启动外层启动器（启动.exe 或 Launcher.exe）。");
+        return false;
     }
 }

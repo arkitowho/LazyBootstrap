@@ -3,13 +3,11 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Threading.Tasks;
-using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Interactivity;
 using Microsoft.Extensions.Logging;
 using LazyBootstrap.Platform;
 using LazyBootstrap.MediaUpdate;
-using LazyBootstrap.Services;
 
 namespace LazyBootstrap.UI
 {
@@ -37,32 +35,7 @@ namespace LazyBootstrap.UI
             _logger.LogInformation("KFC update workflow requested.");
 
             string sevenZipExecutablePath = _paths.ResolveSevenZipExecutablePath();
-            if (!File.Exists(sevenZipExecutablePath))
-            {
-                _logger.LogWarning("KFC update aborted because 7za was not found: {SevenZipPath}", sevenZipExecutablePath);
-                ShowErrorToast("更新失败", $"未找到 7za：{sevenZipExecutablePath}");
-                return;
-            }
-
-            if (!MediaUpdateProtocol.IsValidGameRoot(_paths.BaseDir))
-            {
-                _logger.LogWarning("KFC update aborted because the base directory is not a valid game root: {BaseDir}", _paths.BaseDir);
-                ShowErrorToast(
-                    "无法更新",
-                    "当前游戏目录下未找到 contents 或 asphyxia，请从正确的游戏根目录启动启动器。");
-                return;
-            }
-
             string mediaUpdaterExecutablePath = Path.Combine(_paths.ApplicationDirectoryPath, MediaUpdateProtocol.MediaUpdaterExecutableFileName);
-            if (!File.Exists(mediaUpdaterExecutablePath))
-            {
-                _logger.LogWarning("KFC update aborted because MediaUpdater was not found: {MediaUpdaterPath}", mediaUpdaterExecutablePath);
-                ShowErrorToast(
-                    "更新失败",
-                    $"未找到 {MediaUpdateProtocol.MediaUpdaterExecutableFileName}。请与 LazyBootstrap 一并部署。");
-                return;
-            }
-
             string archivePath = await PickFileAsync("选择更新压缩包", UpdateArchiveFilePatterns).ConfigureAwait(true);
             if (string.IsNullOrWhiteSpace(archivePath) || !File.Exists(archivePath))
             {
@@ -89,31 +62,21 @@ namespace LazyBootstrap.UI
             string stagingDirectoryPath = _paths.GetUpdateStagingDirectoryPath();
             reportProgress?.Invoke("正在准备更新...");
             bool mediaUpdaterStarted = false;
+
             try
             {
                 reportProgress?.Invoke("正在清理更新临时目录...");
-                _logger.LogInformation("Clearing update staging directory: {StagingDirectory}", stagingDirectoryPath);
                 ClearStagingDirectory(stagingDirectoryPath);
-
                 reportProgress?.Invoke("正在解压更新压缩包...");
-                if (!await RunSevenZipExtractAsync(sevenZipExecutablePath, archivePath, stagingDirectoryPath).ConfigureAwait(true))
-                {
-                    _logger.LogWarning("KFC update aborted because archive extraction failed.");
-                    return;
-                }
-
-                if (string.IsNullOrEmpty(MediaUpdateProtocol.FindShallowestFile(stagingDirectoryPath, MediaUpdateProtocol.SyncBatchFileName)))
-                {
-                    _logger.LogWarning("KFC update aborted because sync batch was not found in staging.");
-                    ShowErrorToast("更新失败", $"压缩包中未找到 {MediaUpdateProtocol.SyncBatchFileName}。");
-                    return;
-                }
-
+                if (!await RunSevenZipExtractAsync(sevenZipExecutablePath, archivePath, stagingDirectoryPath).ConfigureAwait(true)) return;
+                string packageDirectory = await Task.Run(() => MediaUpdateChecksums.Verify(_paths.BaseDir, stagingDirectoryPath,
+                    message => Avalonia.Threading.Dispatcher.UIThread.Post(() => reportProgress?.Invoke(message)),
+                    log: message => _logger.LogInformation("{UpdateVerification}", message)));
                 reportProgress?.Invoke("正在启动更新程序...");
                 var updaterStartResult = TryStartMediaUpdater(
                     mediaUpdaterExecutablePath,
                     _paths.BaseDir,
-                    stagingDirectoryPath,
+                    packageDirectory,
                     _paths.ApplicationDirectoryPath,
                     out string updaterStartError);
 
@@ -139,28 +102,13 @@ namespace LazyBootstrap.UI
                 _logger.LogInformation("MediaUpdater started successfully. Main application will exit.");
                 ShowInfoToast(
                     "开始更新",
-                    "本程序将立即退出。请在弹出的更新窗口中完成操作；结束后可通过 启动.exe 继续。");
+                    "本程序将立即退出。更新器预演通过后开始安装，成功后自动重新启动。");
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "KFC update workflow failed.");
                 ShowErrorToast("更新失败", ex.Message);
             }
-            finally
-            {
-                if (!mediaUpdaterStarted)
-                {
-                    try
-                    {
-                        ClearStagingDirectory(stagingDirectoryPath);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogWarning(ex, "Failed to clear update staging directory.");
-                    }
-                }
-            }
-
             if (mediaUpdaterStarted)
             {
                 if (Avalonia.Application.Current?.ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktopLifetime)
@@ -174,12 +122,9 @@ namespace LazyBootstrap.UI
             }
         }
 
-        private static void ClearStagingDirectory(string stagingDirectoryPath)
+        private void ClearStagingDirectory(string stagingDirectoryPath)
         {
-            if (Directory.Exists(stagingDirectoryPath))
-            {
-                Directory.Delete(stagingDirectoryPath, true);
-            }
+            if (Directory.Exists(stagingDirectoryPath)) Directory.Delete(stagingDirectoryPath, true);
         }
 
         private static bool IsSupportedUpdateArchive(string archivePath)
@@ -206,6 +151,7 @@ namespace LazyBootstrap.UI
         {
             try
             {
+
                 Directory.CreateDirectory(outputDir);
                 _logger.LogInformation("Update extraction directory prepared: {OutputDirectory}", outputDir);
             }
@@ -271,7 +217,7 @@ namespace LazyBootstrap.UI
         private static MediaUpdaterStartResult TryStartMediaUpdater(
             string mediaUpdaterPath,
             string gamePath,
-            string stagingPath,
+            string packagePath,
             string applicationDirectoryPath,
             out string error)
         {
@@ -279,16 +225,16 @@ namespace LazyBootstrap.UI
 
             try
             {
-                if (string.IsNullOrEmpty(gamePath) || string.IsNullOrEmpty(stagingPath)
+                if (string.IsNullOrEmpty(gamePath) || string.IsNullOrEmpty(packagePath)
                     || gamePath.Contains('"', StringComparison.Ordinal)
-                    || stagingPath.Contains('"', StringComparison.Ordinal))
+                    || packagePath.Contains('"', StringComparison.Ordinal))
                 {
                     error = "更新路径无效。";
                     return MediaUpdaterStartResult.Failed;
                 }
 
                 string normalizedGamePath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(gamePath));
-                string normalizedStagingPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(stagingPath));
+                string normalizedPackagePath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(packagePath));
 
                 using var process = ProcessExecutionHelper.StartShellProcess(
                     mediaUpdaterPath,
@@ -298,8 +244,10 @@ namespace LazyBootstrap.UI
                     {
                         startInfo.ArgumentList.Add("--game");
                         startInfo.ArgumentList.Add(normalizedGamePath);
-                        startInfo.ArgumentList.Add("--staging");
-                        startInfo.ArgumentList.Add(normalizedStagingPath);
+                        startInfo.ArgumentList.Add("--package");
+                        startInfo.ArgumentList.Add(normalizedPackagePath);
+                        startInfo.ArgumentList.Add("--parent-pid");
+                        startInfo.ArgumentList.Add(global::System.Environment.ProcessId.ToString(global::System.Globalization.CultureInfo.InvariantCulture));
                     });
 
                 if (process == null)

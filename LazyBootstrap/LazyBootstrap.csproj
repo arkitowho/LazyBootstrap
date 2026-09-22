@@ -85,6 +85,12 @@
 
     <ItemGroup>
         <Compile Include="..\LazyBootstrap.MediaUpdater\MediaUpdateProtocol.cs" Link="MediaUpdate\MediaUpdateProtocol.cs"/>
+        <Compile Include="..\LazyBootstrap.MediaUpdater\MediaUpdateSecurity.cs" Link="MediaUpdate\MediaUpdateSecurity.cs"/>
+        <Compile Include="..\LazyBootstrap.MediaUpdater\MediaUpdateManifest.cs" Link="MediaUpdate\MediaUpdateManifest.cs"/>
+        <Compile Include="..\LazyBootstrap.MediaUpdater\MediaUpdateException.cs" Link="MediaUpdate\MediaUpdateException.cs"/>
+        <Compile Include="..\LazyBootstrap.MediaUpdater\MediaUpdateChecksums.cs" Link="MediaUpdate\MediaUpdateChecksums.cs"/>
+        <Compile Include="..\LazyBootstrap.MediaUpdater\MediaUpdateLog.cs" Link="MediaUpdate\MediaUpdateLog.cs"/>
+        <Compile Include="..\LazyBootstrap.MediaUpdater\MediaXmlEditor.cs" Link="MediaUpdate\MediaXmlEditor.cs"/>
     </ItemGroup>
 
     <ItemGroup>

@@ -32,6 +32,7 @@ The launcher relies heavily on Spice2x's functionality
 - (Only Windows) Use `pwsh` to execute commands, not `powershell`
 - SukiUI: Refer directly to the source code for development (SukiUI/), do not search its docs/wiki online
 - Always prioritize checking if SukiUI has a relevant implementation; if not, fall back to AvaloniaUI
+- If codegraph initialized in folder, use it
 
 ## Anti
 

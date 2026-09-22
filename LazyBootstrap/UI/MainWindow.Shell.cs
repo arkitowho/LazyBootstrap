@@ -155,11 +155,6 @@ namespace LazyBootstrap.UI
             {
                 Opened -= OnWindowOpened;
 
-                if (_appConfig.IsReadOnlySession)
-                {
-                    await ShowConfigReadOnlyDialogAsync();
-                }
-
                 if (_pendingEnvironmentScanErrorDialog)
                 {
                     _pendingEnvironmentScanErrorDialog = false;
@@ -207,26 +202,6 @@ namespace LazyBootstrap.UI
                     _ = StartLaunchAsync(false);
                 }
             }, DispatcherPriority.Background);
-        }
-
-        private async Task ShowConfigReadOnlyDialogAsync()
-        {
-            string reason = _appConfig.ReadOnlyReason;
-            string content =
-                "config.toml 被占用或无法读取，当前会话将使用临时内存配置。\n\n" +
-                "你仍可继续使用程序，但所有修改将无法保存。";
-
-            if (!string.IsNullOrWhiteSpace(reason))
-            {
-                content += $"\n\n原因：{reason}";
-            }
-
-            await ShowMessageDialogAsync(
-                "配置文件无法保存",
-                content,
-                "我知道了",
-                NotificationType.Warning,
-                "Flat");
         }
 
         private async Task ShowEnvironmentScanErrorDialogAsync()

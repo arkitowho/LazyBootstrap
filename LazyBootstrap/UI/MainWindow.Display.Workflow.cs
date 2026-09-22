@@ -59,54 +59,40 @@ namespace LazyBootstrap.UI
 
                 EnsureRotationOptions(state);
 
-                state.IsDisplayConfigurationEnabled = _appConfig.ReadBool(AppConfigBootstrapper.DisplaySectionName, "displayconfigure", false);
-                state.IsDualDisplay = !string.Equals(_appConfig.ReadString(AppConfigBootstrapper.DisplaySectionName, "mode", "single"), "single", StringComparison.OrdinalIgnoreCase);
-                state.ExitRestore = _appConfig.ReadBool(AppConfigBootstrapper.DisplaySectionName, "exitrestore", true);
+                state.IsDisplayConfigurationEnabled = _appConfig.ReadBool(AppConfigDefaults.DisplaySectionName, "displayconfigure", false);
+                state.IsDualDisplay = !string.Equals(_appConfig.ReadString(AppConfigDefaults.DisplaySectionName, "mode", "single"), "single", StringComparison.OrdinalIgnoreCase);
+                state.ExitRestore = _appConfig.ReadBool(AppConfigDefaults.DisplaySectionName, "exitrestore", true);
 
-                string mainDisplayId = _appConfig.ReadString(AppConfigBootstrapper.DisplaySectionName, MainDisplayIdConfigKey, string.Empty);
-                string subDisplayId = _appConfig.ReadString(AppConfigBootstrapper.DisplaySectionName, SubDisplayIdConfigKey, string.Empty);
-                string legacyMainIndex = _appConfig.ReadString(AppConfigBootstrapper.DisplaySectionName, LegacyMainScreenConfigKey, string.Empty);
-                string legacySubIndex = _appConfig.ReadString(AppConfigBootstrapper.DisplaySectionName, LegacySubScreenConfigKey, string.Empty);
-                int mainRotation = NormalizeRotationValue(ReadInt(AppConfigBootstrapper.DisplaySectionName, "mainrotation", 0));
-                int subRotation = NormalizeRotationValue(ReadInt(AppConfigBootstrapper.DisplaySectionName, "subrotation", 0));
+                string mainDisplayId = _appConfig.ReadString(AppConfigDefaults.DisplaySectionName, MainDisplayIdConfigKey, string.Empty);
+                string subDisplayId = _appConfig.ReadString(AppConfigDefaults.DisplaySectionName, SubDisplayIdConfigKey, string.Empty);
+                string legacyMainIndex = _appConfig.ReadString(AppConfigDefaults.DisplaySectionName, LegacyMainScreenConfigKey, string.Empty);
+                string legacySubIndex = _appConfig.ReadString(AppConfigDefaults.DisplaySectionName, LegacySubScreenConfigKey, string.Empty);
+                int mainRotation = NormalizeRotationValue(ReadInt(AppConfigDefaults.DisplaySectionName, "mainrotation", 0));
+                int subRotation = NormalizeRotationValue(ReadInt(AppConfigDefaults.DisplaySectionName, "subrotation", 0));
 
                 state.SelectedMainDisplay = ResolveConfiguredDisplay(
                     state,
                     mainDisplayId,
                     legacyMainIndex,
-                    0,
-                    out bool migratedMainDisplayId);
+                    0);
                 state.SelectedSubDisplay = ResolveConfiguredDisplay(
                     state,
                     subDisplayId,
                     legacySubIndex,
-                    Math.Min(1, Math.Max(0, state.Displays.Count - 1)),
-                    out bool migratedSubDisplayId);
+                    Math.Min(1, Math.Max(0, state.Displays.Count - 1)));
                 state.SelectedMainRotation = state.Rotations.FirstOrDefault(option => option.Angle == mainRotation) ?? state.Rotations.FirstOrDefault();
                 state.SelectedSubRotation = state.Rotations.FirstOrDefault(option => option.Angle == subRotation) ?? state.Rotations.FirstOrDefault();
-                state.SelectedMainResolution = _appConfig.ReadString(AppConfigBootstrapper.DisplaySectionName, "mainresolution", string.Empty);
-                state.SelectedSubResolution = _appConfig.ReadString(AppConfigBootstrapper.DisplaySectionName, "subresolution", string.Empty);
-                state.SelectedMainRefreshRate = _appConfig.ReadString(AppConfigBootstrapper.DisplaySectionName, "mainrefresh", string.Empty);
-                state.SelectedSubRefreshRate = _appConfig.ReadString(AppConfigBootstrapper.DisplaySectionName, "subrefresh", string.Empty);
+                state.SelectedMainResolution = _appConfig.ReadString(AppConfigDefaults.DisplaySectionName, "mainresolution", string.Empty);
+                state.SelectedSubResolution = _appConfig.ReadString(AppConfigDefaults.DisplaySectionName, "subresolution", string.Empty);
+                state.SelectedMainRefreshRate = _appConfig.ReadString(AppConfigDefaults.DisplaySectionName, "mainrefresh", string.Empty);
+                state.SelectedSubRefreshRate = _appConfig.ReadString(AppConfigDefaults.DisplaySectionName, "subrefresh", string.Empty);
                 state.SelectedTarget = DisplaySelectionTarget.None;
                 state.ShowNoScreenSelected = true;
                 state.ShowMainScreenConfig = false;
                 state.ShowSubScreenConfig = false;
-
-                if (migratedMainDisplayId)
-                {
-                    WriteDisplayPersistentId(MainDisplayIdConfigKey, state.SelectedMainDisplay);
-                    RemoveLegacyDisplayIndex(LegacyMainScreenConfigKey);
-                }
-
-                if (migratedSubDisplayId)
-                {
-                    WriteDisplayPersistentId(SubDisplayIdConfigKey, state.SelectedSubDisplay);
-                    RemoveLegacyDisplayIndex(LegacySubScreenConfigKey);
-                }
             }
 
-            return HandleConfigurationChangedAsync(state, refreshMainOptions: true, refreshSubOptions: true);
+            return HandleConfigurationChangedAsync(state, refreshMainOptions: true, refreshSubOptions: true, persist: false);
         }
 
         private Task PersistGeneralSettingsAsync(DisplayConfigurationState state)
@@ -114,15 +100,21 @@ namespace LazyBootstrap.UI
             ArgumentNullException.ThrowIfNull(state);
             _logger.LogInformation("Display general settings persistence started.");
 
-            _appConfig.WriteString(AppConfigBootstrapper.DisplaySectionName, "displayconfigure", state.IsDisplayConfigurationEnabled.ToString().ToLowerInvariant());
-            _appConfig.WriteString(AppConfigBootstrapper.DisplaySectionName, "mode", state.IsDualDisplay ? "dual" : "single");
-            _appConfig.WriteString(AppConfigBootstrapper.DisplaySectionName, "exitrestore", state.ExitRestore.ToString().ToLowerInvariant());
+            if (state.IsDisplayConfigurationEnabled)
+            {
+                PersistSelectionState(state);
+                return Task.CompletedTask;
+            }
+
+            _appConfig.WriteString(AppConfigDefaults.DisplaySectionName, "displayconfigure", state.IsDisplayConfigurationEnabled.ToString().ToLowerInvariant());
+            _appConfig.WriteString(AppConfigDefaults.DisplaySectionName, "mode", state.IsDualDisplay ? "dual" : "single");
+            _appConfig.WriteString(AppConfigDefaults.DisplaySectionName, "exitrestore", state.ExitRestore.ToString().ToLowerInvariant());
             SyncSpiceMonitorOverrides(state);
             _logger.LogInformation("Display general settings persisted. Enabled={Enabled}, DualDisplay={DualDisplay}, ExitRestore={ExitRestore}", state.IsDisplayConfigurationEnabled, state.IsDualDisplay, state.ExitRestore);
             return Task.CompletedTask;
         }
 
-        private Task HandleConfigurationChangedAsync(DisplayConfigurationState state, bool refreshMainOptions, bool refreshSubOptions)
+        private Task HandleConfigurationChangedAsync(DisplayConfigurationState state, bool refreshMainOptions, bool refreshSubOptions, bool persist = true)
         {
             ArgumentNullException.ThrowIfNull(state);
             _logger.LogDebug("Display configuration change handling started. RefreshMainOptions={RefreshMainOptions}, RefreshSubOptions={RefreshSubOptions}", refreshMainOptions, refreshSubOptions);
@@ -170,7 +162,7 @@ namespace LazyBootstrap.UI
                     UpdateDisplayInfo(state, false);
                 }
 
-                PersistSelectionState(state);
+                if (persist) PersistSelectionState(state);
                 _logger.LogInformation("Display configuration change handled.");
             }
             catch (Exception ex)
@@ -460,19 +452,20 @@ namespace LazyBootstrap.UI
         private void PersistSelectionState(DisplayConfigurationState state)
         {
             _logger.LogDebug("Persisting display selection state.");
-            _appConfig.WriteString(AppConfigBootstrapper.DisplaySectionName, "displayconfigure", state.IsDisplayConfigurationEnabled.ToString().ToLowerInvariant());
-            _appConfig.WriteString(AppConfigBootstrapper.DisplaySectionName, "mode", state.IsDualDisplay ? "dual" : "single");
-            _appConfig.WriteString(AppConfigBootstrapper.DisplaySectionName, "exitrestore", state.ExitRestore.ToString().ToLowerInvariant());
-            WriteDisplayPersistentId(MainDisplayIdConfigKey, state.SelectedMainDisplay);
-            WriteDisplayPersistentId(SubDisplayIdConfigKey, state.SelectedSubDisplay);
-            RemoveLegacyDisplayIndex(LegacyMainScreenConfigKey);
-            RemoveLegacyDisplayIndex(LegacySubScreenConfigKey);
-            _appConfig.WriteString(AppConfigBootstrapper.DisplaySectionName, "mainrotation", (state.SelectedMainRotation?.Angle ?? 0).ToString());
-            _appConfig.WriteString(AppConfigBootstrapper.DisplaySectionName, "subrotation", (state.SelectedSubRotation?.Angle ?? 0).ToString());
-            _appConfig.WriteString(AppConfigBootstrapper.DisplaySectionName, "mainresolution", state.SelectedMainResolution ?? string.Empty);
-            _appConfig.WriteString(AppConfigBootstrapper.DisplaySectionName, "subresolution", state.SelectedSubResolution ?? string.Empty);
-            _appConfig.WriteString(AppConfigBootstrapper.DisplaySectionName, "mainrefresh", state.SelectedMainRefreshRate ?? string.Empty);
-            _appConfig.WriteString(AppConfigBootstrapper.DisplaySectionName, "subrefresh", state.SelectedSubRefreshRate ?? string.Empty);
+            _appConfig.WriteSection(AppConfigDefaults.DisplaySectionName, new Dictionary<string, string>
+            {
+                ["displayconfigure"] = state.IsDisplayConfigurationEnabled.ToString().ToLowerInvariant(),
+                ["mode"] = state.IsDualDisplay ? "dual" : "single",
+                ["exitrestore"] = state.ExitRestore.ToString().ToLowerInvariant(),
+                [MainDisplayIdConfigKey] = state.SelectedMainDisplay?.Display?.PersistentId ?? string.Empty,
+                [SubDisplayIdConfigKey] = state.SelectedSubDisplay?.Display?.PersistentId ?? string.Empty,
+                ["mainrotation"] = (state.SelectedMainRotation?.Angle ?? 0).ToString(),
+                ["subrotation"] = (state.SelectedSubRotation?.Angle ?? 0).ToString(),
+                ["mainresolution"] = state.SelectedMainResolution ?? string.Empty,
+                ["subresolution"] = state.SelectedSubResolution ?? string.Empty,
+                ["mainrefresh"] = state.SelectedMainRefreshRate ?? string.Empty,
+                ["subrefresh"] = state.SelectedSubRefreshRate ?? string.Empty
+            }, LegacyMainScreenConfigKey, LegacySubScreenConfigKey);
             SyncSpiceMonitorOverrides(state);
             _logger.LogDebug("Display selection state persisted.");
         }
@@ -480,7 +473,7 @@ namespace LazyBootstrap.UI
         private string GetActiveSpiceXmlPathForMonitorSync()
         {
             bool useSystem = bool.TryParse(
-                _appConfig.ReadString(AppConfigBootstrapper.SettingSectionName, "use-system-config", "false"),
+                _appConfig.ReadString(AppConfigDefaults.SettingSectionName, "use-system-config", "false"),
                 out var parsed)
                 && parsed;
             return _paths.ResolveSpiceXmlPath(useSystem);
@@ -591,10 +584,8 @@ namespace LazyBootstrap.UI
             DisplayConfigurationState state,
             string persistentId,
             string legacyIndexText,
-            int defaultIndex,
-            out bool migratedLegacyIndex)
+            int defaultIndex)
         {
-            migratedLegacyIndex = false;
             var selectedById = GetDisplayByPersistentId(state, persistentId);
             if (selectedById != null)
             {
@@ -608,7 +599,6 @@ namespace LazyBootstrap.UI
 
             if (int.TryParse(legacyIndexText, out int legacyIndex))
             {
-                migratedLegacyIndex = true;
                 return GetDisplayByIndex(state, legacyIndex) ?? GetDisplayByIndex(state, defaultIndex);
             }
 
@@ -624,19 +614,6 @@ namespace LazyBootstrap.UI
 
             return state.Displays.FirstOrDefault(display =>
                 string.Equals(display?.Display?.PersistentId, persistentId, StringComparison.OrdinalIgnoreCase));
-        }
-
-        private void WriteDisplayPersistentId(string key, DisplayChoiceOption selectedDisplay)
-        {
-            _appConfig.WriteString(
-                AppConfigBootstrapper.DisplaySectionName,
-                key,
-                selectedDisplay?.Display?.PersistentId ?? string.Empty);
-        }
-
-        private void RemoveLegacyDisplayIndex(string key)
-        {
-            _appConfig.RemoveKey(AppConfigBootstrapper.DisplaySectionName, key);
         }
 
         private static void ReplaceCollection(List<string> target, IReadOnlyList<string> source)

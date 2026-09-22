@@ -5,6 +5,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <AssemblyName>Launcher</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
     <PublishAot>false</PublishAot>
     <PublishTrimmed>false</PublishTrimmed>
     <InvariantGlobalization>true</InvariantGlobalization>
@@ -18,5 +19,11 @@
     <PublishAot>true</PublishAot>
     <PublishTrimmed>true</PublishTrimmed>
   </PropertyGroup>
-
+  <ItemGroup>
+    <Compile Include="../LazyBootstrap/FileSystem/LauncherLocation.cs" Link="Shared/LauncherLocation.cs" />
+    <Compile Include="../LazyBootstrap/FileSystem/SafeFileWriter.cs" Link="Shared/SafeFileWriter.cs" />
+    <Compile Include="../LazyBootstrap/Serialization/AppConfigDocument.cs" Link="Shared/AppConfigDocument.cs" />
+    <Compile Include="../LazyBootstrap/Serialization/AppConfigDefaults.cs" Link="Shared/AppConfigDefaults.cs" />
+    <PackageReference Include="Tomlyn" Version="2.10.1" />
+  </ItemGroup>
 </Project>

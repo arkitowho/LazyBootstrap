@@ -15,6 +15,15 @@ namespace LazyBootstrap.FileSystem
         }
 
         public static bool TryWriteAllBytes(string path, byte[] content, Func<string, string> validateFile, out string error)
+            => TryWrite(path, content, validateFile, out error, existingOnly: false);
+
+        public static bool TryReplaceExistingText(string path, string content, Func<string, string> validateFile, out string error)
+            => TryReplaceExistingBytes(path, Utf8NoBom.GetBytes(content ?? string.Empty), validateFile, out error);
+
+        public static bool TryReplaceExistingBytes(string path, byte[] content, Func<string, string> validateFile, out string error)
+            => TryWrite(path, content, validateFile, out error, existingOnly: true);
+
+        private static bool TryWrite(string path, byte[] content, Func<string, string> validateFile, out string error, bool existingOnly)
         {
             error = string.Empty;
             if (string.IsNullOrWhiteSpace(path))
@@ -45,7 +54,7 @@ namespace LazyBootstrap.FileSystem
 
             try
             {
-                Directory.CreateDirectory(directory);
+                if (!existingOnly) Directory.CreateDirectory(directory);
                 WriteBytesToNewFile(tempPath, content ?? Array.Empty<byte>());
 
                 string tempValidationError = ValidateFile(tempPath, validateFile);
@@ -55,7 +64,19 @@ namespace LazyBootstrap.FileSystem
                     return false;
                 }
 
-                ReplaceWithTempFile(tempPath, fullPath);
+                if (existingOnly)
+                {
+                    // Never fall back to Move: a disappeared destination must stay absent.
+                    using (var probe = new FileStream(fullPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) { }
+                    string existingError = ValidateFile(fullPath, validateFile);
+                    if (!string.IsNullOrWhiteSpace(existingError))
+                        throw new InvalidDataException(existingError);
+                    File.Replace(tempPath, fullPath, null);
+                }
+                else
+                {
+                    ReplaceWithTempFile(tempPath, fullPath);
+                }
                 tempPath = null;
 
                 string targetValidationError = ValidateFile(fullPath, validateFile);
