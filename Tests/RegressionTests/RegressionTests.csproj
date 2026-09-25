@@ -39,6 +39,7 @@
     <Compile Include="../../LazyBootstrap/Serialization/AppConfigDocument.cs" Link="AppConfigDocument.cs" />
     <Compile Include="../../LazyBootstrap/Serialization/AppConfigStore.cs" Link="AppConfigStore.cs" />
     <Compile Include="../../LazyBootstrap/Serialization/AppConfigDefaults.cs" Link="AppConfigDefaults.cs" />
+    <Compile Include="../../LazyBootstrap/Serialization/SpiceXmlConfigEditor.cs" Link="SpiceXmlConfigEditor.cs" />
     <Compile Include="../../LazyBootstrap.Launcher/LauncherConfigPreparation.cs" Link="LauncherConfigPreparation.cs" />
     <PackageReference Include="Tomlyn" Version="2.10.1" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.7" />

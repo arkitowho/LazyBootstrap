@@ -393,6 +393,23 @@
                                                                     <TextBox x:Name="NetworkAdapterSubnetTextBox"
                                                                              Grid.Column="1" />
                                                                 </Grid>
+                                                                <Grid ColumnDefinitions="*,Auto"
+                                                                      VerticalAlignment="Center">
+                                                                    <TextBlock Text="启用全国对战" VerticalAlignment="Center" />
+                                                                    <ToggleSwitch x:Name="NearLinkToggleSwitch"
+                                                                                  Grid.Column="1" />
+                                                                </Grid>
+                                                                <StackPanel Orientation="Horizontal" Opacity="0.7"
+                                                                            Margin="0,-20,0,0">
+                                                                    <TextBlock Text="基于Near Link：" FontSize="12"
+                                                                               VerticalAlignment="Center" />
+                                                                    <Button Classes="Flat" Padding="0" MinHeight="0" MinWidth="0"
+                                                                            Background="Transparent" BorderThickness="0"
+                                                                            Cursor="Hand" Click="OnOpenNearLinkWebsiteClick">
+                                                                        <TextBlock Text="https://near.sdvx.dev/" FontSize="12"
+                                                                                   TextDecorations="Underline" />
+                                                                    </Button>
+                                                                </StackPanel>
                                                             </StackPanel>
                                                         </suki:GlassCard>
                                                     </suki:SettingsLayoutItem.Content>

@@ -217,6 +217,90 @@ namespace LazyBootstrap.Serialization
             }
         }
 
+        internal static bool ContainsInjectedDll(string value, string dllName) =>
+            Regex.Matches(value ?? string.Empty, @"\S+").Cast<Match>()
+                .Any(match => string.Equals(match.Value, dllName, StringComparison.OrdinalIgnoreCase));
+
+        internal bool TrySetDllInjectionEnabled(string spiceXmlPath, string dllName, bool enabled,
+            out string value, out string error)
+        {
+            lock (_sync)
+            {
+                value = string.Empty;
+                error = string.Empty;
+                try
+                {
+                    if (!TryLoadOptionsContext(spiceXmlPath, LoadOptions.PreserveWhitespace, true,
+                            out var context, out var message, out _))
+                    {
+                        error = string.IsNullOrWhiteSpace(message) ? "未能读取 Spice 配置文件。" : message;
+                        return false;
+                    }
+
+                    value = context.GetOptionValue("k");
+                    bool containsDll = ContainsInjectedDll(value, dllName);
+                    if (!enabled && !containsDll)
+                    {
+                        return true;
+                    }
+
+                    string updated;
+                    if (enabled)
+                    {
+                        updated = Regex.Replace(value.Trim(), @"\s+", " ");
+                        if (!containsDll)
+                        {
+                            updated = updated.Length == 0 ? dllName : updated + " " + dllName;
+                        }
+                    }
+                    else
+                    {
+                        updated = RemoveInjectedDll(value, dllName);
+                    }
+                    if (string.Equals(value, updated, StringComparison.Ordinal)) return true;
+
+                    ApplyUpdates(context, new[] { new SpiceOptionUpdate("k", updated) });
+                    value = updated;
+                    return true;
+                }
+                catch (Exception ex)
+                {
+                    error = ex.Message;
+                    return false;
+                }
+            }
+        }
+
+        private static string RemoveInjectedDll(string value, string dllName)
+        {
+            var result = new StringBuilder();
+            int previousEnd = 0;
+            bool removed = false;
+            foreach (Match token in Regex.Matches(value, @"\S+"))
+            {
+                if (string.Equals(token.Value, dllName, StringComparison.OrdinalIgnoreCase))
+                {
+                    removed = true;
+                    continue;
+                }
+
+                // Only normalize the separator spanning removed entries; preserve all other text.
+                if (removed)
+                {
+                    if (result.Length > 0) result.Append(' ');
+                }
+                else
+                {
+                    result.Append(value, previousEnd, token.Index - previousEnd);
+                }
+                result.Append(token.Value);
+                previousEnd = token.Index + token.Length;
+                removed = false;
+            }
+            if (!removed) result.Append(value, previousEnd, value.Length - previousEnd);
+            return result.ToString();
+        }
+
         private static XElement CreateOptionElement(SpiceOptionUpdate update)
         {
             return new XElement(
@@ -231,7 +315,8 @@ namespace LazyBootstrap.Serialization
             var settings = new XmlWriterSettings
             {
                 Indent = false,
-                NewLineHandling = NewLineHandling.None,
+                // Preserve attribute whitespace through XML parsing (tabs/newlines need entities).
+                NewLineHandling = NewLineHandling.Entitize,
                 Encoding = new UTF8Encoding(false),
                 OmitXmlDeclaration = false,
                 NewLineChars = newline,

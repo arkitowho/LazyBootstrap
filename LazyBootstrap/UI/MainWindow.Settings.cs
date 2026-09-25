@@ -585,8 +585,63 @@ namespace LazyBootstrap.UI
 
         private void ApplySpiceTextInputsFromState()
         {
-            SetTextBoxTextIfNeeded(DllInjectionTextBox, _settingsState.DllInjection);
+            ApplyDllInjectionStateToUi();
             SetTextBoxTextIfNeeded(WindowSizeTextBox, _settingsState.WindowSize);
+        }
+
+        private const string NearLinkDllName = "near_link.dll";
+
+        private void ApplyDllInjectionStateToUi()
+        {
+            bool previousLoadingState = _isLoadingSettings;
+            _isLoadingSettings = true;
+            try
+            {
+                SetTextBoxTextIfNeeded(DllInjectionTextBox, _settingsState.DllInjection);
+                if (NearLinkToggleSwitch != null)
+                {
+                    NearLinkToggleSwitch.IsChecked = SpiceXmlConfigEditor.ContainsInjectedDll(
+                        _settingsState.DllInjection, NearLinkDllName);
+                }
+            }
+            finally
+            {
+                _isLoadingSettings = previousLoadingState;
+            }
+        }
+
+        private void OnNearLinkToggleChanged(object sender, RoutedEventArgs e)
+        {
+            if (_isLoadingSettings) return;
+            bool enabled = NearLinkToggleSwitch.IsChecked == true;
+            string spiceXmlPath = _paths.ResolveSpiceXmlPath(_settingsState.UseSystemSpiceConfig);
+            if (_spiceXmlConfigEditor.TrySetDllInjectionEnabled(spiceXmlPath, NearLinkDllName, enabled,
+                    out var value, out var error))
+            {
+                _settingsState.DllInjection = value;
+                _logger.LogInformation("Near link DLL injection updated. Enabled={Enabled}", enabled);
+            }
+            else
+            {
+                _logger.LogWarning("Failed to update near link DLL injection: {Error}", error);
+                ShowErrorToast("写入配置失败", "无法更新全国对战设置，请检查配置文件是否可读写。详情请查看日志。");
+                ReloadRuntimeState(_settingsState);
+            }
+            ApplyDllInjectionStateToUi();
+        }
+
+        private void OnOpenNearLinkWebsiteClick(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                ProcessExecutionHelper.StartShellProcess(
+                    "https://near.sdvx.dev/", _paths.ApplicationDirectoryPath, false)?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to open the Near Link website in the default browser.");
+                ShowErrorToast("无法打开链接", "请检查系统默认浏览器设置后重试。");
+            }
         }
 
         private void ApplyAsioDriverChoicesFromState()
@@ -1010,9 +1065,17 @@ namespace LazyBootstrap.UI
                 DllInjectionTextBox.TextChanged += async (_, _) =>
                 {
                     if (_isLoadingSettings) return;
-                    _settingsState.DllInjection = DllInjectionTextBox.Text ?? string.Empty;
+                    string value = DllInjectionTextBox.Text ?? string.Empty;
+                    if (string.Equals(value, _settingsState.DllInjection, StringComparison.Ordinal)) return;
+                    _settingsState.DllInjection = value;
                     await PersistSpiceSettingsAsync(_settingsState);
+                    ApplyDllInjectionStateToUi();
                 };
+            }
+
+            if (NearLinkToggleSwitch != null)
+            {
+                NearLinkToggleSwitch.IsCheckedChanged += OnNearLinkToggleChanged;
             }
 
             BindToggleSwitch(NetDumpToggleSwitch, v => _settingsState.NetDump = v, PersistSpice);
