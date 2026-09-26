@@ -142,7 +142,7 @@
                                     <suki:SettingsLayout x:Name="GameSettingsLayout"
                                                          Margin="0,6,0,0"
                                                          StackSummaryWidth="320"
-                                                         MinWidthWhetherStackSummaryShow="1020">
+                                                         MinWidthWhetherStackSummaryShow="1">
                                         <suki:SettingsLayout.Items>
                                             <generic:List x:TypeArguments="suki:SettingsLayoutItem">
                                                 <suki:SettingsLayoutItem Header="基础">
