@@ -58,7 +58,7 @@ namespace LazyBootstrap.UI
 
             public NetworkAdapterOption SelectedNetworkAdapter { get; set; }
 
-            public string GpuCompatLayerRenderMode { get; set; } = "dx9on12";
+            public string GpuCompatLayerRenderMode { get; set; } = "shaderfix";
 
             public bool Windowed { get; set; }
 
@@ -773,9 +773,9 @@ namespace LazyBootstrap.UI
                     GpuCompatLayerDx9on12RadioButton.IsChecked = string.Equals(renderMode, "dx9on12", StringComparison.OrdinalIgnoreCase);
                 }
 
-                if (GpuCompatLayerDx9on12ExternalRadioButton != null)
+                if (GpuCompatLayerShaderFixRadioButton != null)
                 {
-                    GpuCompatLayerDx9on12ExternalRadioButton.IsChecked = string.Equals(renderMode, "dx9on12_external", StringComparison.OrdinalIgnoreCase);
+                    GpuCompatLayerShaderFixRadioButton.IsChecked = string.Equals(renderMode, "shaderfix", StringComparison.OrdinalIgnoreCase);
                 }
 
                 if (GpuCompatLayerDxvkRadioButton != null)
@@ -784,7 +784,7 @@ namespace LazyBootstrap.UI
                 }
 
                 if (GpuCompatLayerDx9on12RadioButton != null) GpuCompatLayerDx9on12RadioButton.IsEnabled = chipsEnabled;
-                if (GpuCompatLayerDx9on12ExternalRadioButton != null) GpuCompatLayerDx9on12ExternalRadioButton.IsEnabled = chipsEnabled;
+                if (GpuCompatLayerShaderFixRadioButton != null) GpuCompatLayerShaderFixRadioButton.IsEnabled = chipsEnabled;
                 if (GpuCompatLayerDxvkRadioButton != null) GpuCompatLayerDxvkRadioButton.IsEnabled = chipsEnabled;
             }
             finally
@@ -1344,7 +1344,7 @@ namespace LazyBootstrap.UI
             }
             settings.DisableSpiceFso = _appConfig.ReadBool(AppConfigDefaults.SettingSectionName, DisableFsoConfigKey, false);
             settings.UseSystemSpiceConfig = _appConfig.ReadBool(AppConfigDefaults.SettingSectionName, UseSystemConfigKey, false);
-            settings.GpuCompatLayerRenderMode = GpuCompatLayerConfigurator.NormalizeRenderMode(_appConfig.ReadString(AppConfigDefaults.SettingSectionName, "cl-rendermode", "dx9on12"));
+            settings.GpuCompatLayerRenderMode = GpuCompatLayerConfigurator.NormalizeRenderMode(_appConfig.ReadString(AppConfigDefaults.SettingSectionName, "cl-rendermode", "shaderfix"));
             settings.IsSpiceConfigAvailable = IsSpiceConfigAvailable(settings.UseSystemSpiceConfig);
             settings.SpiceConfigEmptyStateMessage = MissingSpiceConfigMessage;
             RefreshGpuCompatLayerState(settings);
@@ -1590,7 +1590,7 @@ namespace LazyBootstrap.UI
             ArgumentNullException.ThrowIfNull(settings);
             _logger.LogInformation("GPU compatibility layer toggle persistence started.");
 
-            if (settings.GpuCompatLayerEnabled && !GetGpuCompatLayerRuntimeState().IsFullyApplied)
+            if (settings.GpuCompatLayerEnabled && !GetGpuCompatLayerRuntimeState(settings, out _).IsFullyApplied)
             {
                 return ConfirmAndEnableGpuCompatLayerAsync(settings);
             }
@@ -1963,7 +1963,12 @@ namespace LazyBootstrap.UI
 
         private void RefreshGpuCompatLayerState(SettingsState settings)
         {
-            var runtimeState = GetGpuCompatLayerRuntimeState();
+            var runtimeState = GetGpuCompatLayerRuntimeState(settings, out var dllInjection);
+            settings.DllInjection = dllInjection;
+            if (ReferenceEquals(settings, _settingsState))
+            {
+                ApplyDllInjectionStateToUi();
+            }
             var configuredRenderMode = GpuCompatLayerConfigurator.NormalizeRenderMode(settings.GpuCompatLayerRenderMode);
 
             settings.GpuCompatLayerRenderMode = string.IsNullOrWhiteSpace(runtimeState.DetectedRenderMode)
@@ -2157,13 +2162,17 @@ namespace LazyBootstrap.UI
             return choices;
         }
 
-        private GpuCompatLayerRuntimeState GetGpuCompatLayerRuntimeState()
+        private GpuCompatLayerRuntimeState GetGpuCompatLayerRuntimeState(SettingsState settings, out string dllInjection)
         {
+            dllInjection = string.Empty;
             try
             {
+                var optionValues = ReadSpiceOptionValues(_paths.ResolveSpiceXmlPath(settings.UseSystemSpiceConfig));
+                dllInjection = optionValues.TryGetValue("k", out var value) ? value : string.Empty;
                 return GpuCompatLayerConfigurator.DetectRuntimeState(
                     _paths.GetContentsDirectoryPath(),
-                    _paths.GetBundledLibsDirectoryPath());
+                    _paths.GetBundledLibsDirectoryPath(),
+                    dllInjection);
             }
             catch (Exception ex)
             {

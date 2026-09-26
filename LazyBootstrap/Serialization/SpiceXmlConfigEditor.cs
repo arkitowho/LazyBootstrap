@@ -222,7 +222,7 @@ namespace LazyBootstrap.Serialization
                 .Any(match => string.Equals(match.Value, dllName, StringComparison.OrdinalIgnoreCase));
 
         internal bool TrySetDllInjectionEnabled(string spiceXmlPath, string dllName, bool enabled,
-            out string value, out string error)
+            out string value, out string error, IEnumerable<SpiceOptionUpdate> additionalUpdates = null)
         {
             lock (_sync)
             {
@@ -239,11 +239,6 @@ namespace LazyBootstrap.Serialization
 
                     value = context.GetOptionValue("k");
                     bool containsDll = ContainsInjectedDll(value, dllName);
-                    if (!enabled && !containsDll)
-                    {
-                        return true;
-                    }
-
                     string updated;
                     if (enabled)
                     {
@@ -255,11 +250,17 @@ namespace LazyBootstrap.Serialization
                     }
                     else
                     {
-                        updated = RemoveInjectedDll(value, dllName);
+                        updated = containsDll ? RemoveInjectedDll(value, dllName) : value;
                     }
-                    if (string.Equals(value, updated, StringComparison.Ordinal)) return true;
 
-                    ApplyUpdates(context, new[] { new SpiceOptionUpdate("k", updated) });
+                    var updates = additionalUpdates?.ToList() ?? new List<SpiceOptionUpdate>();
+                    if (!string.Equals(value, updated, StringComparison.Ordinal))
+                    {
+                        updates.Add(new SpiceOptionUpdate("k", updated));
+                    }
+                    if (updates.Count == 0) return true;
+
+                    ApplyUpdates(context, updates);
                     value = updated;
                     return true;
                 }

@@ -234,8 +234,34 @@
                                                                           ColumnDefinitions="*,*,*"
                                                                           ColumnSpacing="12">
                                                                         <RadioButton
-                                                                            x:Name="GpuCompatLayerDx9on12RadioButton"
+                                                                            x:Name="GpuCompatLayerShaderFixRadioButton"
                                                                             Grid.Column="0"
+                                                                            HorizontalAlignment="Stretch"
+                                                                            MinWidth="0"
+                                                                            MinHeight="82"
+                                                                            Padding="0"
+                                                                            GroupName="CompatType"
+                                                                            Classes="GigaChips"
+                                                                            Click="OnSelectGpuCompatLayerRenderModeClick"
+                                                                            CommandParameter="shaderfix">
+                                                                            <StackPanel HorizontalAlignment="Left"
+                                                                                    VerticalAlignment="Top" Spacing="0"
+                                                                                    Margin="0,0,28,0">
+                                                                                <TextBlock Text="着色器修复"
+                                                                                    FontSize="10"
+                                                                                    FontWeight="DemiBold"
+                                                                                    Foreground="{DynamicResource SukiLowText}" />
+                                                                                <TextBlock Text="ShaderFix" FontSize="16"
+                                                                                    FontWeight="DemiBold"
+                                                                                    TextWrapping="Wrap" />
+                                                                                <TextBlock Text="默认兼容模式" FontSize="12"
+                                                                                    Foreground="{DynamicResource SukiLowText}"
+                                                                                    TextWrapping="Wrap" />
+                                                                            </StackPanel>
+                                                                        </RadioButton>
+                                                                        <RadioButton
+                                                                            x:Name="GpuCompatLayerDx9on12RadioButton"
+                                                                            Grid.Column="1"
                                                                             HorizontalAlignment="Stretch"
                                                                             MinWidth="0"
                                                                             MinHeight="82"
@@ -251,36 +277,10 @@
                                                                                     FontSize="10"
                                                                                     FontWeight="DemiBold"
                                                                                     Foreground="{DynamicResource SukiLowText}" />
-                                                                                <TextBlock Text="dx9on12" FontSize="16"
-                                                                                    FontWeight="DemiBold"
-                                                                                    TextWrapping="Wrap" />
-                                                                                <TextBlock Text="最常用的模式" FontSize="12"
-                                                                                    Foreground="{DynamicResource SukiLowText}"
-                                                                                    TextWrapping="Wrap" />
-                                                                            </StackPanel>
-                                                                        </RadioButton>
-                                                                        <RadioButton
-                                                                            x:Name="GpuCompatLayerDx9on12ExternalRadioButton"
-                                                                            Grid.Column="1"
-                                                                            HorizontalAlignment="Stretch"
-                                                                            MinWidth="0"
-                                                                            MinHeight="82"
-                                                                            Padding="0"
-                                                                            GroupName="CompatType"
-                                                                            Classes="GigaChips"
-                                                                            Click="OnSelectGpuCompatLayerRenderModeClick"
-                                                                            CommandParameter="dx9on12_external">
-                                                                            <StackPanel HorizontalAlignment="Left"
-                                                                                    VerticalAlignment="Top" Spacing="0"
-                                                                                    Margin="0,0,28,0">
-                                                                                <TextBlock Text="DIRECTX 12"
-                                                                                    FontSize="10"
-                                                                                    FontWeight="DemiBold"
-                                                                                    Foreground="{DynamicResource SukiLowText}" />
-                                                                                <TextBlock Text="dx9on12（外置）"
+                                                                                <TextBlock Text="dx9on12"
                                                                                     FontSize="16"
                                                                                     FontWeight="DemiBold" />
-                                                                                <TextBlock Text="可能比内置的好" FontSize="12"
+                                                                                <TextBlock Text="内置转译模式" FontSize="12"
                                                                                     Foreground="{DynamicResource SukiLowText}"
                                                                                     TextWrapping="Wrap" />
                                                                             </StackPanel>

@@ -19,7 +19,7 @@ namespace LazyBootstrap.Serialization
             new ConfigDefaultEntry(SettingSectionName, "auto-launch", "false"),
             new ConfigDefaultEntry(SettingSectionName, "disable-fso", "false"),
             new ConfigDefaultEntry(SettingSectionName, "compatlayer", "false"),
-            new ConfigDefaultEntry(SettingSectionName, "cl-rendermode", "dx9on12"),
+            new ConfigDefaultEntry(SettingSectionName, "cl-rendermode", "shaderfix"),
             new ConfigDefaultEntry(SettingSectionName, "use-system-config", "false"),
 
             new ConfigDefaultEntry(DisplaySectionName, "displayconfigure", "false"),

@@ -16,6 +16,7 @@ namespace LazyBootstrap.Platform
 
     internal sealed class GpuCompatLayerConfigurator
     {
+        internal const string ShaderFixDllName = "sdvx_shader_fix_64bit.dll";
         private static readonly string[] BaseGpuCompatLayerFiles = { "nvcuda.dll", "nvcuvid.dll", "nvEncodeAPI64.dll" };
         private static readonly string[] ManagedGpuCompatLayerFiles = { "nvcuda.dll", "nvcuvid.dll", "nvEncodeAPI64.dll", "d3d9.dll" };
 
@@ -76,7 +77,7 @@ namespace LazyBootstrap.Platform
                 _appConfig.WriteString(AppConfigDefaults.SettingSectionName, "compatlayer", enable ? "true" : "false");
                 _appConfig.WriteString(AppConfigDefaults.SettingSectionName, "cl-rendermode", renderMode);
 
-                if (!_spiceXmlConfigEditor.ApplySpiceOptions(spiceXmlPath, BuildDxModeUpdates(enable, renderMode), out var spiceError))
+                if (!ApplySpiceOptions(spiceXmlPath, enable, renderMode, out var spiceError))
                 {
                     _logger.LogWarning("GPU compatibility layer XML update failed. Rolling back.");
                     error = CombineErrors($"写入 spicetools.xml 失败: {spiceError}", RestoreSnapshots(snapshots));
@@ -119,7 +120,7 @@ namespace LazyBootstrap.Platform
                     return false;
                 }
 
-                if (!_spiceXmlConfigEditor.ApplySpiceOptions(spiceXmlPath, BuildDxModeUpdates(true, renderMode), out var spiceError))
+                if (!ApplySpiceOptions(spiceXmlPath, true, renderMode, out var spiceError))
                 {
                     _logger.LogWarning("GPU compatibility layer XML refresh failed. Rolling back.");
                     error = CombineErrors($"写入 spicetools.xml 失败: {spiceError}", RestoreSnapshots(snapshots));
@@ -144,12 +145,12 @@ namespace LazyBootstrap.Platform
                 return "dxvk";
             }
 
-            if (string.Equals(renderMode, "dx9on12_external", StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(renderMode, "dx9on12", StringComparison.OrdinalIgnoreCase))
             {
-                return "dx9on12_external";
+                return "dx9on12";
             }
 
-            return "dx9on12";
+            return "shaderfix";
         }
 
         public static string ResolveDxModeValue(bool gpuCompatLayerEnabled, string renderMode)
@@ -164,7 +165,8 @@ namespace LazyBootstrap.Platform
                 : "0";
         }
 
-        internal static GpuCompatLayerRuntimeState DetectRuntimeState(string contentsDirectoryPath, string bundledLibsDirectoryPath)
+        internal static GpuCompatLayerRuntimeState DetectRuntimeState(string contentsDirectoryPath, string bundledLibsDirectoryPath,
+            string dllInjection = null)
         {
             if (string.IsNullOrWhiteSpace(contentsDirectoryPath))
             {
@@ -189,15 +191,10 @@ namespace LazyBootstrap.Platform
             if (File.Exists(d3d9Path))
             {
                 string dxvkStubPath = Path.Combine(bundledLibsDirectoryPath ?? string.Empty, "d3d9.dll.dxvk");
-                string externalStubPath = Path.Combine(bundledLibsDirectoryPath ?? string.Empty, "d3d9.dll.dx9on12");
 
                 if (FilesMatch(d3d9Path, dxvkStubPath))
                 {
                     detectedRenderMode = "dxvk";
-                }
-                else if (FilesMatch(d3d9Path, externalStubPath))
-                {
-                    detectedRenderMode = "dx9on12_external";
                 }
                 else
                 {
@@ -206,7 +203,9 @@ namespace LazyBootstrap.Platform
             }
             else if (hasAllBaseFiles)
             {
-                detectedRenderMode = "dx9on12";
+                detectedRenderMode = SpiceXmlConfigEditor.ContainsInjectedDll(dllInjection, ShaderFixDllName)
+                    ? "shaderfix"
+                    : "dx9on12";
             }
 
             bool isFullyApplied = hasAllBaseFiles
@@ -345,7 +344,6 @@ namespace LazyBootstrap.Platform
             return NormalizeRenderMode(renderMode) switch
             {
                 "dxvk" => "d3d9.dll.dxvk",
-                "dx9on12_external" => "d3d9.dll.dx9on12",
                 _ => string.Empty
             };
         }
@@ -390,13 +388,15 @@ namespace LazyBootstrap.Platform
                 FileStateSnapshot.Capture(spiceXmlPath));
         }
 
-        private static SpiceOptionUpdate[] BuildDxModeUpdates(bool gpuCompatLayerEnabled, string renderMode)
+        private bool ApplySpiceOptions(string spiceXmlPath, bool gpuCompatLayerEnabled, string renderMode, out string error)
         {
             string dxModeValue = ResolveDxModeValue(gpuCompatLayerEnabled, renderMode);
-            return
+            bool shaderFixEnabled = gpuCompatLayerEnabled && NormalizeRenderMode(renderMode) == "shaderfix";
+            return _spiceXmlConfigEditor.TrySetDllInjectionEnabled(spiceXmlPath, ShaderFixDllName, shaderFixEnabled,
+                out _, out error,
             [
                 new SpiceOptionUpdate("sp2x-dx9on12", dxModeValue, string.IsNullOrEmpty(dxModeValue))
-            ];
+            ]);
         }
 
         private static string RestoreSnapshots(GpuCompatLayerSnapshots snapshots)
