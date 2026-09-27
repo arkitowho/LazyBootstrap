@@ -679,12 +679,15 @@
                             <suki:SukiSideMenuItem.PageContent>
                                 <Grid Margin="14" RowDefinitions="Auto,*,Auto"
                                       ColumnDefinitions="360,*" ColumnSpacing="14" RowSpacing="10">
-                                    <Grid Grid.ColumnSpan="2" ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="10"
+                                    <Grid Grid.ColumnSpan="2" ColumnDefinitions="Auto,*,Auto,Auto,Auto" ColumnSpacing="10"
                                           Margin="0,0,0,10">
                                         <StackPanel Spacing="2">
                                             <TextBlock Text="显示器配置" FontSize="22" FontWeight="SemiBold"
                                                        VerticalAlignment="Center" />
                                             <TextBlock Text="点击开关启用自动显示器配置" Opacity="0.7" />
+                                            <TextBlock x:Name="DisplayDiscoveryStatusText" FontSize="12" Opacity="0.7"
+                                                       MaxWidth="260" TextWrapping="Wrap" HorizontalAlignment="Left"
+                                                       Text="正在检测显示器…" />
                                         </StackPanel>
                                         <Grid Grid.Column="1" />
                                         <ToggleSwitch x:Name="DisplayConfigEnabledToggleSwitch" Grid.Column="2"
@@ -693,6 +696,8 @@
                                             <ComboBoxItem Content="单屏" />
                                             <ComboBoxItem Content="双屏" />
                                         </ComboBox>
+                                        <Button x:Name="RefreshDisplaysButton" Grid.Column="4" Content="重新检测" Click="OnRefreshDisplaysClick"
+                                                VerticalAlignment="Center" />
                                     </Grid>
 
                                     <Grid Grid.Row="1" Grid.Column="0" RowDefinitions="*,Auto" RowSpacing="12">

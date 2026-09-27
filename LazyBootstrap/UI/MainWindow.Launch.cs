@@ -169,6 +169,8 @@ namespace LazyBootstrap.UI
 
             try
             {
+                // Pausing invalidates old reads; drain native calls before any game process can start.
+                await _displayRefreshCoordinator.WaitForQueriesToFinishAsync(cancellationToken);
                 string spicePath = _paths.GetSpicePath();
                 string asphyxiaPath = _paths.GetAsphyxiaPath();
                 string serverAddress = (request.ServerAddress ?? string.Empty).Trim();
@@ -240,7 +242,10 @@ namespace LazyBootstrap.UI
                 if (!asphyxiaDevOnly && display.IsDisplayConfigurationEnabled)
                 {
                     AppendLaunchOutput(launchState, "正在应用显示器配置...");
-                    bool applySucceeded = TryApplyDisplayForLaunch(display, out var restoreStates, out var displayMessages);
+                    var displayResult = await ApplyDisplayTransactionAsync(display);
+                    bool applySucceeded = displayResult.Succeeded;
+                    var restoreStates = displayResult.RestoreStates;
+                    var displayMessages = displayResult.Messages;
                     _logger.LogInformation(
                         "Display configuration apply for launch completed. Succeeded={Succeeded}, RestoreStateCount={RestoreStateCount}, MessageCount={MessageCount}",
                         applySucceeded,
@@ -252,9 +257,11 @@ namespace LazyBootstrap.UI
                         AppendLaunchOutput(launchState, displayMessage, NotificationType.Warning);
                     }
 
-                    if (!applySucceeded && restoreStates.Count > 0)
+                    if (!applySucceeded)
                     {
-                        FailLaunch(launchState, "显示器配置未能完整回滚，请检查当前显示器状态后重试。");
+                        FailLaunch(launchState, restoreStates.Count > 0
+                            ? "显示器配置未能完整回滚，请检查当前显示器状态后重试。"
+                            : "显示器配置失败，请检查目标显示器或重新检测后重试。");
                         return;
                     }
 
@@ -433,6 +440,7 @@ namespace LazyBootstrap.UI
                 }
 
                 launchWorkflowCts.Dispose();
+                NotifyLaunchStateChanged(launchState);
             }
         }
 
@@ -958,6 +966,8 @@ namespace LazyBootstrap.UI
         {
             if (launchState != null)
             {
+                if (Dispatcher.UIThread.CheckAccess()) SynchronizeDisplayDetectionWithLaunchState();
+                else Dispatcher.UIThread.Post(SynchronizeDisplayDetectionWithLaunchState);
                 Dispatcher.UIThread.Post(ApplyLaunchStateToUi);
             }
         }

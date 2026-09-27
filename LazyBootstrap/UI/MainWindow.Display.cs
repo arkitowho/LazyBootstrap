@@ -15,18 +15,20 @@ namespace LazyBootstrap.UI
     {
         private readonly DisplayConfigurationState _displayState = new DisplayConfigurationState();
 
-        private DisplayConfigurationRequest BuildDisplayConfigurationRequest() => new DisplayConfigurationRequest(
-            _displayState.IsDisplayConfigurationEnabled,
-            _displayState.IsDualDisplay,
-            _displayState.ExitRestore,
-            _displayState.SelectedMainDisplay,
-            _displayState.SelectedSubDisplay,
-            _displayState.SelectedMainRotation,
-            _displayState.SelectedSubRotation,
-            _displayState.SelectedMainResolution,
-            _displayState.SelectedSubResolution,
-            _displayState.SelectedMainRefreshRate,
-            _displayState.SelectedSubRefreshRate);
+        private DisplayConfigurationRequest BuildDisplayConfigurationRequest() => BuildDisplayConfigurationRequest(_displayState);
+
+        private static DisplayConfigurationRequest BuildDisplayConfigurationRequest(DisplayConfigurationState state) => new DisplayConfigurationRequest(
+            state.IsDisplayConfigurationEnabled,
+            state.IsDualDisplay,
+            state.ExitRestore,
+            state.SelectedMainDisplay,
+            state.SelectedSubDisplay,
+            state.SelectedMainRotation,
+            state.SelectedSubRotation,
+            state.SelectedMainResolution,
+            state.SelectedSubResolution,
+            state.SelectedMainRefreshRate,
+            state.SelectedSubRefreshRate);
 
         private DispatcherTimer _displayPulseTimer;
         private double _displayPulsePhase = 0d;
@@ -44,7 +46,7 @@ namespace LazyBootstrap.UI
             {
                 ExitRestoreToggleSwitch.IsCheckedChanged += async (_, _) =>
                 {
-                    if (_isLoadingDisplaySettings) return;
+                    if (ShouldSkipDisplayLayoutInteraction()) return;
                     bool enabled = ExitRestoreToggleSwitch.IsChecked == true;
                     _displayState.ExitRestore = enabled;
                     await PersistGeneralSettingsAsync(_displayState);
@@ -215,7 +217,7 @@ namespace LazyBootstrap.UI
 
         private bool ShouldSkipDisplayLayoutInteraction()
         {
-            return _isLoadingDisplaySettings || _isUpdatingDisplayLayoutUi;
+            return _isLoadingDisplaySettings || _isUpdatingDisplayLayoutUi || _displayTransactionActive || IsDisplayDetectionPaused;
         }
 
         private async Task HandleDisplaySelectionChangedAsync(Action updateState, bool refreshMainOptions, bool refreshSubOptions)
@@ -324,6 +326,7 @@ namespace LazyBootstrap.UI
 
         private void ApplyDisplayStateToUi()
         {
+            if (_displayRefreshCoordinator?.IsDisposed == true) return;
             bool previousLoadingState = _isLoadingDisplaySettings;
             bool previousDisplayUpdateState = _isUpdatingDisplayLayoutUi;
             _isLoadingDisplaySettings = true;
@@ -413,6 +416,13 @@ namespace LazyBootstrap.UI
                 return;
             }
 
+            // Different disconnected monitors may have the same label. Never match them by text.
+            if (value is DisplayChoiceOption)
+            {
+                comboBox.SelectedItem = value;
+                return;
+            }
+
             var selectedText = value?.ToString() ?? string.Empty;
             foreach (var item in comboBox.Items.Cast<object>())
             {
@@ -425,19 +435,25 @@ namespace LazyBootstrap.UI
                 }
             }
 
-            comboBox.SelectedIndex = 0;
+            comboBox.SelectedIndex = value == null ? -1 : 0;
         }
 
         private void UpdateDisplayLayoutControlsEnabled()
         {
-            bool enabled = _displayState.IsDisplayConfigurationEnabled;
+            bool canConfigure = !_displayTransactionActive && !IsDisplayDetectionPaused;
+            bool enabled = _displayState.IsDisplayConfigurationEnabled && canConfigure;
             bool isDualDisplay = _displayState.IsDualDisplay;
             bool subEnabled = enabled && isDualDisplay;
             var selectedTarget = _displayState.SelectedTarget;
 
+            if (DisplayConfigEnabledToggleSwitch != null) DisplayConfigEnabledToggleSwitch.IsEnabled = canConfigure;
+            if (RefreshDisplaysButton != null) RefreshDisplaysButton.IsEnabled = canConfigure && !_isRefreshingDisplays;
+            if (DisplayModeComboBox != null) DisplayModeComboBox.IsEnabled = canConfigure;
+            if (ExitRestoreToggleSwitch != null) ExitRestoreToggleSwitch.IsEnabled = canConfigure;
+
             if (DisplayConfigDisabledMask != null)
             {
-                DisplayConfigDisabledMask.IsBusy = !enabled;
+                DisplayConfigDisabledMask.IsBusy = !_displayState.IsDisplayConfigurationEnabled;
             }
 
             if (MainScreenComboBox != null) MainScreenComboBox.IsEnabled = enabled;
@@ -586,6 +602,8 @@ namespace LazyBootstrap.UI
 
         private sealed class DisplayConfigurationState
         {
+            public string LegacyMainIndex { get; set; } = string.Empty;
+            public string LegacySubIndex { get; set; } = string.Empty;
             public List<DisplayChoiceOption> Displays { get; } = new List<DisplayChoiceOption>();
             public List<RotationOption> Rotations { get; } = new List<RotationOption>();
             public List<string> MainResolutions { get; } = new List<string>();

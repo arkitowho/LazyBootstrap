@@ -51,6 +51,7 @@ namespace LazyBootstrap.UI
             WindowsStartupService windowsStartupService,
             WindowsDisplayConfigurationService displayConfigurationService,
             DisplaySettingsTransactionCoordinator displaySettingsTransactionCoordinator,
+            DisplayRefreshCoordinator displayRefreshCoordinator,
             SavedataTransferService savedataTransferService,
             ISukiDialogManager dialogManager,
             ISukiToastManager toastManager,
@@ -65,6 +66,7 @@ namespace LazyBootstrap.UI
             _windowsDefenderExclusionService = windowsDefenderExclusionService ?? throw new ArgumentNullException(nameof(windowsDefenderExclusionService));
             InitializeSettingsServices(spiceXmlConfigEditor, gpuCompatLayerConfigurator, appCompatLayerService, windowsStartupService);
             InitializeDisplayServices(displayConfigurationService, displaySettingsTransactionCoordinator);
+            _displayRefreshCoordinator = displayRefreshCoordinator ?? throw new ArgumentNullException(nameof(displayRefreshCoordinator));
             InitializeToolsServices(savedataTransferService);
             _dialogManager = dialogManager ?? throw new ArgumentNullException(nameof(dialogManager));
             _toastManager = toastManager ?? throw new ArgumentNullException(nameof(toastManager));

@@ -14,6 +14,8 @@ internal static class Program
 {
     private static int Main(string[] args)
     {
+        if (args.Contains("--display")) return DisplayRegression.RunAll();
+        if (args.Contains("--display-live")) return DisplayRegression.RunLive();
         if (args.Contains("--launcher-smoke-child"))
         {
             string marker = args[Array.IndexOf(args, "--launcher-smoke-child") + 1];
@@ -126,6 +128,7 @@ internal static class Program
             Assert(File.ReadAllText(Path.Combine(source, "savedata", "player")) == "original", "目录联接导致存档改变");
         }, ref failed);
         failed += UpdateRegression.RunAll();
+        failed += DisplayRegression.RunAll();
         Console.WriteLine($"失败用例数：{failed}");
         return failed == 0 ? 0 : 1;
     }

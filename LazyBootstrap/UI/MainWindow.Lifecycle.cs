@@ -69,6 +69,7 @@ namespace LazyBootstrap.UI
 
         private void OnWindowClosed(object sender, EventArgs e)
         {
+            DisposeDisplayRefresh();
             Opened -= OnWindowOpened;
             Closed -= OnWindowClosed;
             Closing -= OnWindowClosing;

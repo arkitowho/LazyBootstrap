@@ -8,12 +8,17 @@ using System.Runtime.Versioning;
 namespace LazyBootstrap.Services
 {
 
+    internal enum DisplayDiscoveryStatus { Complete, Partial, Failed }
+
     internal sealed class DisplayDiscoveryResult
     {
-        public DisplayDiscoveryResult(IReadOnlyList<DisplayInfo> displays, string errorMessage = "")
+        public DisplayDiscoveryResult(IReadOnlyList<DisplayInfo> displays, string errorMessage = "", int adapterCount = 0, int desktopCount = 0)
         {
             Displays = displays ?? Array.Empty<DisplayInfo>();
-            ErrorMessage = errorMessage ?? string.Empty;
+            ErrorMessage = Displays.Count == 0 && string.IsNullOrWhiteSpace(errorMessage)
+                ? "暂未检测到已启用的显示器，请稍后重新检测。" : errorMessage ?? string.Empty;
+            AdapterCount = adapterCount;
+            DesktopCount = desktopCount;
         }
 
         public IReadOnlyList<DisplayInfo> Displays { get; }
@@ -21,6 +26,10 @@ namespace LazyBootstrap.Services
         public string ErrorMessage { get; }
 
         public bool Succeeded => string.IsNullOrWhiteSpace(ErrorMessage);
+        public DisplayDiscoveryStatus Status => Succeeded ? DisplayDiscoveryStatus.Complete
+            : Displays.Count > 0 ? DisplayDiscoveryStatus.Partial : DisplayDiscoveryStatus.Failed;
+        public int AdapterCount { get; }
+        public int DesktopCount { get; }
     }
 
     internal sealed class DisplayModeQueryResult
@@ -85,6 +94,7 @@ namespace LazyBootstrap.Services
         public string FriendlyName { get; init; } = string.Empty;
 
         public bool IsPrimary { get; init; }
+        public bool IsAvailable => !string.IsNullOrWhiteSpace(DeviceName);
     }
 
     internal sealed class DisplayMode
@@ -140,6 +150,29 @@ namespace LazyBootstrap.Services
         private const int DisplayDeviceActive = 0x1;
         private const int DisplayDevicePrimaryDevice = 0x4;
         private const int DisplayDeviceMirroringDriver = 0x8;
+
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        private struct MonitorInfo
+        {
+            public int Size;
+            public int Left, Top, Right, Bottom;
+            public int WorkLeft, WorkTop, WorkRight, WorkBottom;
+            public uint Flags;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+            public string DeviceName;
+        }
+
+        [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private delegate bool MonitorEnumCallback(IntPtr monitor, IntPtr hdc, IntPtr rect, IntPtr data);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool EnumDisplayMonitors(IntPtr hdc, IntPtr clip, MonitorEnumCallback callback, IntPtr data);
+
+        [DllImport("user32.dll", EntryPoint = "GetMonitorInfoW", CharSet = CharSet.Unicode, ExactSpelling = true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo info);
 
         private const int DmdoDefault = 0;
         private const int Dmdo90 = 1;
@@ -234,54 +267,116 @@ namespace LazyBootstrap.Services
 
         public DisplayDiscoveryResult GetDisplays()
         {
-            var result = new List<DisplayInfo>();
-            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var displays = new Dictionary<string, DisplayInfo>(StringComparer.OrdinalIgnoreCase);
+            var excluded = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var errors = new List<string>();
+            int adapterCount = 0;
+            int desktopCount = 0;
+            try
+            {
+                for (uint index = 0; ; index++)
+                {
+                    var adapter = CreateDisplayDevice();
+                    if (!TryEnumDisplayDevices(null, index, ref adapter)) break;
+                    if (string.IsNullOrWhiteSpace(adapter.DeviceName)) continue;
+                    if ((adapter.StateFlags & DisplayDeviceMirroringDriver) != 0)
+                    {
+                        excluded.Add(adapter.DeviceName);
+                        continue;
+                    }
+                    if ((adapter.StateFlags & DisplayDeviceActive) == 0) continue;
+                    adapterCount++;
+                    // A driver/metadata failure on one output must not discard later outputs.
+                    var info = new DisplayInfo
+                    {
+                        DeviceName = adapter.DeviceName,
+                        PersistentId = adapter.DeviceName,
+                        FriendlyName = adapter.DeviceName,
+                        IsPrimary = (adapter.StateFlags & DisplayDevicePrimaryDevice) != 0
+                    };
+                    try
+                    {
+                        var monitors = EnumerateActiveMonitors(adapter.DeviceName);
+                        info = new DisplayInfo
+                        {
+                            DeviceName = adapter.DeviceName,
+                            PersistentId = ResolvePersistentId(adapter, monitors),
+                            FriendlyName = ResolveFriendlyName(adapter, monitors),
+                            IsPrimary = info.IsPrimary
+                        };
+                    }
+                    catch (Exception ex) { errors.Add($"读取 {adapter.DeviceName} 信息失败: {ex.Message}"); }
+                    displays[adapter.DeviceName] = info;
+                }
+            }
+            catch (Exception ex) { errors.Add($"枚举显示设备失败: {ex.Message}"); }
 
             try
             {
-                uint adapterIndex = 0;
-                while (true)
+                var desktop = EnumerateDesktopDisplays();
+                desktopCount = desktop.Displays.Count;
+                if (!desktop.Succeeded) errors.Add(desktop.ErrorMessage);
+                foreach (var display in desktop.Displays)
                 {
-                    var adapter = CreateDisplayDevice();
-                    if (!TryEnumDisplayDevices(null, adapterIndex, ref adapter))
+                    if (!display.IsAvailable || excluded.Contains(display.DeviceName)) continue;
+                    if (!displays.ContainsKey(display.DeviceName))
                     {
-                        break;
-                    }
-
-                    bool adapterActive = (adapter.StateFlags & DisplayDeviceActive) != 0;
-                    bool adapterMirroring = (adapter.StateFlags & DisplayDeviceMirroringDriver) != 0;
-                    if (!adapterActive || adapterMirroring || string.IsNullOrWhiteSpace(adapter.DeviceName))
-                    {
-                        adapterIndex++;
-                        continue;
-                    }
-
-                    var activeMonitors = EnumerateActiveMonitors(adapter.DeviceName);
-                    string friendly = ResolveFriendlyName(adapter, activeMonitors);
-                    string persistentId = ResolvePersistentId(adapter, activeMonitors);
-
-                    if (seen.Add(adapter.DeviceName))
-                    {
-                        result.Add(new DisplayInfo
+                        var adapter = CreateDisplayDevice();
+                        adapter.DeviceName = display.DeviceName;
+                        try
                         {
-                            DeviceName = adapter.DeviceName,
-                            PersistentId = persistentId,
-                            FriendlyName = friendly,
-                            IsPrimary = (adapter.StateFlags & DisplayDevicePrimaryDevice) != 0
-                        });
+                            var monitors = EnumerateActiveMonitors(display.DeviceName);
+                            displays[display.DeviceName] = new DisplayInfo
+                            {
+                                DeviceName = display.DeviceName,
+                                PersistentId = ResolvePersistentId(adapter, monitors),
+                                FriendlyName = ResolveFriendlyName(adapter, monitors),
+                                IsPrimary = display.IsPrimary
+                            };
+                        }
+                        catch (Exception ex)
+                        {
+                            displays[display.DeviceName] = display;
+                            errors.Add($"读取 {display.DeviceName} 信息失败: {ex.Message}");
+                        }
                     }
-
-                    adapterIndex++;
                 }
-
-                return new DisplayDiscoveryResult(result);
             }
-            catch (Exception ex)
-            {
-                return new DisplayDiscoveryResult(result, $"枚举显示器失败: {ex.Message}");
-            }
+            catch (Exception ex) { errors.Add($"枚举桌面显示器失败: {ex.Message}"); }
+            return new DisplayDiscoveryResult(displays.Values.ToArray(), string.Join("\n", errors), adapterCount, desktopCount);
         }
 
+        protected virtual DisplayDiscoveryResult EnumerateDesktopDisplays()
+        {
+            var displays = new List<DisplayInfo>();
+            bool incomplete = false;
+            MonitorEnumCallback callback = (monitor, _, _, _) =>
+            {
+                // Never let an exception cross the unmanaged callback boundary.
+                try
+                {
+                    var info = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
+                    if (!GetMonitorInfo(monitor, ref info) || string.IsNullOrWhiteSpace(info.DeviceName))
+                    {
+                        incomplete = true;
+                        return true;
+                    }
+                    displays.Add(new DisplayInfo
+                    {
+                        DeviceName = info.DeviceName,
+                        PersistentId = info.DeviceName,
+                        FriendlyName = info.DeviceName,
+                        IsPrimary = (info.Flags & 1) != 0
+                    });
+                }
+                catch { incomplete = true; }
+                return true;
+            };
+            bool success = EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, callback, IntPtr.Zero);
+            GC.KeepAlive(callback);
+            return new DisplayDiscoveryResult(displays,
+                success && !incomplete ? string.Empty : "无法完整读取桌面显示器列表。");
+        }
         public DisplayModeQueryResult GetSupportedModes(string deviceName)
         {
             var modes = new List<DisplayMode>();
