@@ -48,6 +48,42 @@ namespace LazyBootstrap.Services
             public IReadOnlyList<EnvironmentCheckResult> Items { get; }
         }
 
+        internal static List<string> GetGpuNames()
+        {
+            var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (!OperatingSystem.IsWindows())
+            {
+                return set.ToList();
+            }
+
+            try
+            {
+                using (var root = Registry.LocalMachine.OpenSubKey(@"SYSTEM\\CurrentControlSet\\Control\\Video"))
+                {
+                    if (root == null) return set.ToList();
+                    foreach (var guid in root.GetSubKeyNames())
+                    {
+                        using (var adapterKey = root.OpenSubKey(guid))
+                        {
+                            if (adapterKey == null) continue;
+                            foreach (var sub in new[] { "0000", "0001", "0002" })
+                            {
+                                using (var conf = adapterKey.OpenSubKey(sub))
+                                {
+                                    var desc = conf?.GetValue("DriverDesc") as string;
+                                    if (!string.IsNullOrWhiteSpace(desc)) set.Add(desc.Trim());
+                                    var adapterStr = conf?.GetValue("HardwareInformation.AdapterString") as string;
+                                    if (!string.IsNullOrWhiteSpace(adapterStr)) set.Add(adapterStr.Trim());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
+            return set.ToList();
+        }
+
         public static Task<EnvironmentScanSummary> RunAsync(
             Action<int, string> progress,
             string contentsDirectoryPath,
@@ -98,42 +134,6 @@ namespace LazyBootstrap.Services
                 }
                 catch { }
                 return "未知处理器";
-            }
-
-            List<string> GetGpuNames()
-            {
-                var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                if (!OperatingSystem.IsWindows())
-                {
-                    return set.ToList();
-                }
-
-                try
-                {
-                    using (var root = Registry.LocalMachine.OpenSubKey(@"SYSTEM\\CurrentControlSet\\Control\\Video"))
-                    {
-                        if (root == null) return set.ToList();
-                        foreach (var guid in root.GetSubKeyNames())
-                        {
-                            using (var adapterKey = root.OpenSubKey(guid))
-                            {
-                                if (adapterKey == null) continue;
-                                foreach (var sub in new[] { "0000", "0001", "0002" })
-                                {
-                                    using (var conf = adapterKey.OpenSubKey(sub))
-                                    {
-                                        var desc = conf?.GetValue("DriverDesc") as string;
-                                        if (!string.IsNullOrWhiteSpace(desc)) set.Add(desc.Trim());
-                                        var adapterStr = conf?.GetValue("HardwareInformation.AdapterString") as string;
-                                        if (!string.IsNullOrWhiteSpace(adapterStr)) set.Add(adapterStr.Trim());
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                catch { }
-                return set.ToList();
             }
 
             void CheckDlls(string groupName, string dllDirectory, string[] dllNames, string faultLabel = "运行时检测")

@@ -1785,26 +1785,31 @@ namespace LazyBootstrap.UI
 
         private async Task ConfirmAndEnableGpuCompatLayerAsync(SettingsState settings)
         {
-            _logger.LogInformation("GPU compatibility layer confirmation dialog opened.");
             var renderMode = GpuCompatLayerConfigurator.NormalizeRenderMode(settings.GpuCompatLayerRenderMode);
-            string methodName = renderMode switch
+            bool hasNvidiaGpu = EnvironmentScanner.GetGpuNames()
+                .Any(name => name.Contains("NVIDIA", StringComparison.OrdinalIgnoreCase));
+            if (hasNvidiaGpu)
             {
-                "dxvk" => "Vulkan 转译（DXVK）",
-                "dx9on12" => "DirectX 12 转译（DX9On12）",
-                _ => "仅着色器修复（ShaderFix）"
-            };
-            var confirmed = await ShowDialogAsync(
-                $"启用{methodName}",
-                $"即将启用{methodName}并自动配置相关补丁。\n请确认你的显卡为 AMD 或 Intel，否则请勿开启。\n你确定要继续吗？",
-                "确认",
-                "取消",
-                NotificationType.Warning);
+                _logger.LogInformation("GPU compatibility layer confirmation dialog opened because an NVIDIA GPU was detected.");
+                string methodName = renderMode switch
+                {
+                    "dxvk" => "Vulkan 转译（DXVK）",
+                    "dx9on12" => "DirectX 12 转译（DX9On12）",
+                    _ => "仅着色器修复（ShaderFix）"
+                };
+                var confirmed = await ShowDialogAsync(
+                    $"启用{methodName}",
+                    "检测到当前系统内存在 NVIDIA 显卡，不需要启用此选项，强制开启将造成无法预估的后果，你确定要启用吗？",
+                    "确认",
+                    "取消",
+                    NotificationType.Warning);
 
-            if (!confirmed)
-            {
-                _logger.LogInformation("GPU compatibility layer enable was cancelled.");
-                settings.GpuCompatLayerEnabled = false;
-                return;
+                if (!confirmed)
+                {
+                    _logger.LogInformation("GPU compatibility layer enable was cancelled.");
+                    settings.GpuCompatLayerEnabled = false;
+                    return;
+                }
             }
 
             string spiceXmlPath = _paths.ResolveSpiceXmlPath(settings.UseSystemSpiceConfig);
@@ -1816,11 +1821,11 @@ namespace LazyBootstrap.UI
             {
                 settings.GpuCompatLayerRenderMode = renderMode;
                 RefreshGpuCompatLayerState(settings);
-                _logger.LogInformation("GPU compatibility layer enable completed after confirmation.");
+                _logger.LogInformation("GPU compatibility layer enable completed.");
                 return;
             }
 
-            _logger.LogWarning("GPU compatibility layer enable failed after confirmation.");
+            _logger.LogWarning("GPU compatibility layer enable failed.");
             ShowErrorToast("兼容层切换失败", string.IsNullOrWhiteSpace(error) ? "未知错误" : error);
             RefreshGpuCompatLayerState(settings);
         }
