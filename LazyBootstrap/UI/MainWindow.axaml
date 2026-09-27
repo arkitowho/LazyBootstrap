@@ -138,10 +138,10 @@
                                 <TextBlock Classes="FaIcon" Text="&#xF013;" FontSize="14" />
                             </suki:SukiSideMenuItem.Icon>
                             <suki:SukiSideMenuItem.PageContent>
-                                <Grid Margin="20,14" HorizontalAlignment="Center" MaxWidth="1240">
+                                <Grid Margin="20,14" HorizontalAlignment="Stretch" MaxWidth="1050">
                                     <suki:SettingsLayout x:Name="GameSettingsLayout"
                                                          Margin="0,6,0,0"
-                                                         StackSummaryWidth="320"
+                                                         StackSummaryWidth="344"
                                                          MinWidthWhetherStackSummaryShow="1">
                                         <suki:SettingsLayout.Items>
                                             <generic:List x:TypeArguments="suki:SettingsLayoutItem">
@@ -199,123 +199,83 @@
                                                     </suki:SettingsLayoutItem.Content>
                                                 </suki:SettingsLayoutItem>
 
-                                                <suki:SettingsLayoutItem Header="AMD/Intel显卡兼容层">
+                                                <suki:SettingsLayoutItem Header="AMD/Intel显卡专属">
                                                     <suki:SettingsLayoutItem.Content>
-                                                        <suki:GlassCard Margin="0,18,0,0" Padding="14">
-                                                            <StackPanel Spacing="8">
-                                                                <Grid ColumnDefinitions="*,Auto"
-                                                                      VerticalAlignment="Center">
-                                                                    <TextBlock Text="启用显卡兼容层"
-                                                                               VerticalAlignment="Center" />
+                                                        <suki:GlassCard Margin="0,18,0,0" Padding="18">
+                                                            <StackPanel Spacing="16">
+                                                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                                                    <StackPanel Spacing="6" VerticalAlignment="Center">
+                                                                        <TextBlock Text="启动兼容层"
+                                                                                   FontWeight="DemiBold" TextWrapping="Wrap" />
+                                                                        <TextBlock Text="为 AMD / Intel 显卡配置兼容补丁"
+                                                                                   Foreground="{DynamicResource SukiLowText}"
+                                                                                   FontSize="12" TextWrapping="Wrap" />
+                                                                    </StackPanel>
                                                                     <ToggleSwitch x:Name="GpuCompatLayerToggleSwitch"
-                                                                            Grid.Column="1" />
+                                                                                  Grid.Column="1" VerticalAlignment="Center"
+                                                                                  AutomationProperties.Name="启动兼容层" />
                                                                 </Grid>
-                                                                <TextBlock Text="启用后会导入相关补丁并设置 spice2x" Opacity="0.7"
-                                                                           FontSize="12" VerticalAlignment="Center"
-                                                                           Margin="0,-18,0,0" />
-                                                                <suki:BusyArea
-                                                                    x:Name="GpuCompatLayerRenderModeBusyArea"
-                                                                    BusyText="兼容层已启动，请关闭以修改设置">
-                                                                    <suki:BusyArea.Styles>
-                                                                        <Style
-                                                                            Selector="suki|BusyArea[IsBusy=False] /template/ DockPanel#LoadingBusyArea">
-                                                                            <Setter Property="IsHitTestVisible"
-                                                                                    Value="False" />
-                                                                        </Style>
-                                                                        <Style
-                                                                            Selector="suki|BusyArea[IsBusy=True] /template/ DockPanel#LoadingBusyArea">
-                                                                            <Setter Property="IsHitTestVisible"
-                                                                                    Value="True" />
-                                                                        </Style>
-                                                                    </suki:BusyArea.Styles>
-                                                                    <Grid HorizontalAlignment="Center"
-                                                                          MaxWidth="684"
-                                                                          Margin="0,2,0,0"
-                                                                          ColumnDefinitions="*,*,*"
-                                                                          ColumnSpacing="12">
-                                                                        <RadioButton
-                                                                            x:Name="GpuCompatLayerShaderFixRadioButton"
-                                                                            Grid.Column="0"
-                                                                            HorizontalAlignment="Stretch"
-                                                                            MinWidth="0"
-                                                                            MinHeight="82"
-                                                                            Padding="0"
-                                                                            GroupName="CompatType"
-                                                                            Classes="GigaChips"
-                                                                            Click="OnSelectGpuCompatLayerRenderModeClick"
-                                                                            CommandParameter="shaderfix">
-                                                                            <StackPanel HorizontalAlignment="Left"
-                                                                                    VerticalAlignment="Top" Spacing="0"
-                                                                                    Margin="0,0,28,0">
-                                                                                <TextBlock Text="着色器修复"
-                                                                                    FontSize="10"
-                                                                                    FontWeight="DemiBold"
-                                                                                    Foreground="{DynamicResource SukiLowText}" />
-                                                                                <TextBlock Text="ShaderFix" FontSize="16"
-                                                                                    FontWeight="DemiBold"
-                                                                                    TextWrapping="Wrap" />
-                                                                                <TextBlock Text="默认兼容模式" FontSize="12"
-                                                                                    Foreground="{DynamicResource SukiLowText}"
-                                                                                    TextWrapping="Wrap" />
-                                                                            </StackPanel>
-                                                                        </RadioButton>
-                                                                        <RadioButton
-                                                                            x:Name="GpuCompatLayerDx9on12RadioButton"
-                                                                            Grid.Column="1"
-                                                                            HorizontalAlignment="Stretch"
-                                                                            MinWidth="0"
-                                                                            MinHeight="82"
-                                                                            Padding="0"
-                                                                            GroupName="CompatType"
-                                                                            Classes="GigaChips"
-                                                                            Click="OnSelectGpuCompatLayerRenderModeClick"
-                                                                            CommandParameter="dx9on12">
-                                                                            <StackPanel HorizontalAlignment="Left"
-                                                                                    VerticalAlignment="Top" Spacing="0"
-                                                                                    Margin="0,0,28,0">
-                                                                                <TextBlock Text="DIRECTX 12"
-                                                                                    FontSize="10"
-                                                                                    FontWeight="DemiBold"
-                                                                                    Foreground="{DynamicResource SukiLowText}" />
-                                                                                <TextBlock Text="dx9on12"
-                                                                                    FontSize="16"
-                                                                                    FontWeight="DemiBold" />
-                                                                                <TextBlock Text="内置转译模式" FontSize="12"
-                                                                                    Foreground="{DynamicResource SukiLowText}"
-                                                                                    TextWrapping="Wrap" />
-                                                                            </StackPanel>
-                                                                        </RadioButton>
-                                                                        <RadioButton
-                                                                            x:Name="GpuCompatLayerDxvkRadioButton"
-                                                                            Grid.Column="2"
-                                                                            HorizontalAlignment="Stretch"
-                                                                            MinWidth="0"
-                                                                            MinHeight="82"
-                                                                            Padding="0"
-                                                                            GroupName="CompatType"
-                                                                            Classes="GigaChips"
-                                                                            Click="OnSelectGpuCompatLayerRenderModeClick"
-                                                                            CommandParameter="dxvk">
-                                                                            <StackPanel HorizontalAlignment="Left"
-                                                                                    VerticalAlignment="Top" Spacing="0"
-                                                                                    Margin="0,0,28,0">
-                                                                                <TextBlock Text="VULKAN" FontSize="10"
-                                                                                    FontWeight="DemiBold"
-                                                                                    Foreground="{DynamicResource SukiLowText}" />
-                                                                                <TextBlock Text="dxvk" FontSize="16"
-                                                                                    FontWeight="DemiBold" />
-                                                                                <TextBlock Text="Vulkan 转译模式"
-                                                                                    FontSize="12"
-                                                                                    Foreground="{DynamicResource SukiLowText}"
-                                                                                    TextWrapping="Wrap" />
-                                                                            </StackPanel>
-                                                                        </RadioButton>
-                                                                    </Grid>
-                                                                </suki:BusyArea>
+                                                                <Border Height="1" Background="{DynamicResource SukiControlBorderBrush}"
+                                                                        Opacity="0.6" />
+                                                                <StackPanel Spacing="8">
+                                                                    <TextBlock Text="选择模式" FontSize="12"
+                                                                               Foreground="{DynamicResource SukiLowText}"
+                                                                               Margin="4,0,0,0" />
+                                                                    <RadioButton x:Name="GpuCompatLayerShaderFixRadioButton"
+                                                                                 Classes="GigaChips" GroupName="CompatType"
+                                                                                 HorizontalAlignment="Stretch"
+                                                                                 HorizontalContentAlignment="Stretch" MinWidth="0"
+                                                                                 Click="OnSelectGpuCompatLayerRenderModeClick"
+                                                                                 CommandParameter="shaderfix">
+                                                                        <StackPanel Spacing="6" Margin="0,0,12,0">
+                                                                            <WrapPanel>
+                                                                                <TextBlock Text="仅着色器修复" FontWeight="DemiBold"
+                                                                                           VerticalAlignment="Center"
+                                                                                           Margin="0,0,8,0" />
+                                                                                <Border Background="{DynamicResource SukiPrimaryColor10}"
+                                                                                        CornerRadius="4" Padding="6,2">
+                                                                                    <TextBlock Text="默认" FontSize="10"
+                                                                                               Foreground="{DynamicResource SukiPrimaryColor}" />
+                                                                                </Border>
+                                                                            </WrapPanel>
+                                                                            <TextBlock Text="ShaderFix补丁"
+                                                                                       FontSize="12" TextWrapping="Wrap"
+                                                                                       Foreground="{DynamicResource SukiLowText}" />
+                                                                        </StackPanel>
+                                                                    </RadioButton>
+                                                                    <RadioButton x:Name="GpuCompatLayerDx9on12RadioButton"
+                                                                                 Classes="GigaChips" GroupName="CompatType"
+                                                                                 HorizontalAlignment="Stretch"
+                                                                                 HorizontalContentAlignment="Stretch" MinWidth="0"
+                                                                                 Click="OnSelectGpuCompatLayerRenderModeClick"
+                                                                                 CommandParameter="dx9on12">
+                                                                        <StackPanel Spacing="6" Margin="0,0,12,0">
+                                                                            <TextBlock Text="DirectX 12 转译" FontWeight="DemiBold"
+                                                                                       TextWrapping="Wrap" />
+                                                                            <TextBlock Text="使用 DirectX 12 转译 Direct3D 9"
+                                                                                       FontSize="12" TextWrapping="Wrap"
+                                                                                       Foreground="{DynamicResource SukiLowText}" />
+                                                                        </StackPanel>
+                                                                    </RadioButton>
+                                                                    <RadioButton x:Name="GpuCompatLayerDxvkRadioButton"
+                                                                                 Classes="GigaChips" GroupName="CompatType"
+                                                                                 HorizontalAlignment="Stretch"
+                                                                                 HorizontalContentAlignment="Stretch" MinWidth="0"
+                                                                                 Click="OnSelectGpuCompatLayerRenderModeClick"
+                                                                                 CommandParameter="dxvk">
+                                                                        <StackPanel Spacing="6" Margin="0,0,12,0">
+                                                                            <TextBlock Text="Vulkan 转译" FontWeight="DemiBold"
+                                                                                       TextWrapping="Wrap" />
+                                                                            <TextBlock Text="使用 Vulkan 转译 Direct3D 9"
+                                                                                       FontSize="12" TextWrapping="Wrap"
+                                                                                       Foreground="{DynamicResource SukiLowText}" />
+                                                                        </StackPanel>
+                                                                    </RadioButton>
+                                                                </StackPanel>
                                                                 <TextBlock x:Name="GpuCompatLayerStatusTextBlock"
-                                                                           Text=""
-                                                                           Opacity="0.75" Margin="0,2,0,0"
-                                                                           IsVisible="False" />
+                                                                           Foreground="{DynamicResource SukiLowText}"
+                                                                           FontSize="12" TextWrapping="Wrap"
+                                                                           Margin="4,0,4,0" IsVisible="False" />
                                                             </StackPanel>
                                                         </suki:GlassCard>
                                                     </suki:SettingsLayoutItem.Content>
