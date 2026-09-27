@@ -58,7 +58,7 @@ namespace LazyBootstrap.UI
 
             public NetworkAdapterOption SelectedNetworkAdapter { get; set; }
 
-            public string GpuCompatLayerRenderMode { get; set; } = "dx9on12";
+            public string GpuCompatLayerRenderMode { get; set; } = "shaderfix";
 
             public bool Windowed { get; set; }
 
@@ -143,6 +143,7 @@ namespace LazyBootstrap.UI
         private bool _isLoadingSettings;
         private bool _isSyncingSettingsUi;
         private bool _isUpdatingGpuCompatLayerUi;
+        private bool _isApplyingGpuCompatLayer;
         private bool _isUpdatingServerPresetUi;
         private bool _isUpdatingAsioDriverUi;
         private bool _isUpdatingNetworkUi;
@@ -267,26 +268,44 @@ namespace LazyBootstrap.UI
 
         private async void OnSelectGpuCompatLayerRenderModeClick(object sender, RoutedEventArgs e)
         {
-            if (sender is not Button btn)
+            if (_isLoadingSettings || _isUpdatingGpuCompatLayerUi || _isApplyingGpuCompatLayer)
             {
                 return;
             }
 
-            var mode = btn.Tag?.ToString() ?? btn.CommandParameter?.ToString() ?? string.Empty;
-            string normalizedMode = GpuCompatLayerConfigurator.NormalizeRenderMode(mode);
-            if (string.Equals(
-                    GpuCompatLayerConfigurator.NormalizeRenderMode(_settingsState.GpuCompatLayerRenderMode),
-                    normalizedMode,
-                    StringComparison.OrdinalIgnoreCase))
+            if (_settingsState.GpuCompatLayerEnabled || sender is not RadioButton { IsEnabled: true } button)
             {
-                _settingsState.GpuCompatLayerRenderMode = normalizedMode;
                 UpdateGpuCompatLayerStatus();
                 return;
             }
 
-            _settingsState.GpuCompatLayerRenderMode = normalizedMode;
-            await PersistGpuCompatLayerRenderModeAsync(_settingsState);
-            UpdateGpuCompatLayerStatus();
+            string mode = button.CommandParameter?.ToString();
+            if (mode is not ("shaderfix" or "dx9on12" or "dxvk")) return;
+            string previousMode = _settingsState.GpuCompatLayerRenderMode;
+            if (mode == previousMode)
+            {
+                UpdateGpuCompatLayerStatus();
+                return;
+            }
+
+            _isApplyingGpuCompatLayer = true;
+            try
+            {
+                _settingsState.GpuCompatLayerRenderMode = mode;
+                UpdateGpuCompatLayerStatus();
+                await PersistGpuCompatLayerRenderModeAsync(_settingsState);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Persist compatibility layer render mode failed.");
+                ShowErrorToast("兼容模式保存失败", ex.Message);
+            }
+            finally
+            {
+                _isApplyingGpuCompatLayer = false;
+                _settingsState.GpuCompatLayerRenderMode = previousMode;
+                ReloadGpuCompatLayerUi();
+            }
         }
 
         private async void OnAddServerPresetClick(object sender, RoutedEventArgs e)
@@ -716,45 +735,69 @@ namespace LazyBootstrap.UI
 
         private async void OnGpuCompatLayerToggleChanged(object sender, RoutedEventArgs e)
         {
+            if (_isLoadingSettings || _isUpdatingGpuCompatLayerUi || _isApplyingGpuCompatLayer)
+            {
+                return;
+            }
+
+            if (sender is not ToggleSwitch { IsEnabled: true } toggle) return;
+
+            string mode = GpuCompatLayerConfigurator.NormalizeRenderMode(_settingsState.GpuCompatLayerRenderMode);
+            bool enable = toggle.IsChecked == true;
+
+            _isApplyingGpuCompatLayer = true;
             try
             {
-                if (_isLoadingSettings || _isUpdatingGpuCompatLayerUi)
-                {
-                    return;
-                }
-
-                _settingsState.GpuCompatLayerEnabled = GpuCompatLayerToggleSwitch?.IsChecked == true;
-                await PersistGpuCompatLayerToggleAsync(_settingsState);
                 UpdateGpuCompatLayerStatus();
+                _settingsState.GpuCompatLayerEnabled = enable;
+                await PersistGpuCompatLayerToggleAsync(_settingsState);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Persist compatibility layer toggle failed.");
+                ShowErrorToast("兼容层切换失败", ex.Message);
             }
+            finally
+            {
+                _isApplyingGpuCompatLayer = false;
+                _settingsState.GpuCompatLayerRenderMode = mode;
+                ReloadGpuCompatLayerUi();
+            }
+        }
+
+        private void ReloadGpuCompatLayerUi()
+        {
+            // A cancelled or rolled-back operation must also restore the saved mode preference.
+            try
+            {
+                _settingsState.GpuCompatLayerRenderMode = GpuCompatLayerConfigurator.NormalizeRenderMode(
+                    _appConfig.ReadString(AppConfigDefaults.SettingSectionName, "cl-rendermode", "shaderfix"));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to reload compatibility layer preference. Keeping the previous selection.");
+            }
+            RefreshGpuCompatLayerState(_settingsState);
+            UpdateGpuCompatLayerStatus();
         }
 
         private void UpdateGpuCompatLayerStatus()
         {
             bool modulesDirectoryExists = HasGpuCompatLayerModulesDirectory();
             bool gpuCompatLayerEnabled = _settingsState.GpuCompatLayerEnabled;
-
-            if (GpuCompatLayerRenderModeBusyArea != null)
-            {
-                GpuCompatLayerRenderModeBusyArea.IsBusy = gpuCompatLayerEnabled;
-            }
+            string renderMode = GpuCompatLayerConfigurator.NormalizeRenderMode(_settingsState.GpuCompatLayerRenderMode);
+            bool canInteract = !_isApplyingGpuCompatLayer && _settingsState.IsSpiceConfigAvailable;
 
             if (GpuCompatLayerStatusTextBlock != null)
             {
-                if (!modulesDirectoryExists && !gpuCompatLayerEnabled)
-                {
-                    GpuCompatLayerStatusTextBlock.Text = "未找到modules目录，无法启用显卡兼容层。";
-                    GpuCompatLayerStatusTextBlock.IsVisible = true;
-                }
-                else
-                {
-                    GpuCompatLayerStatusTextBlock.Text = string.Empty;
-                    GpuCompatLayerStatusTextBlock.IsVisible = false;
-                }
+                GpuCompatLayerStatusTextBlock.Text = _isApplyingGpuCompatLayer
+                    ? "正在处理兼容层设置…"
+                    : !modulesDirectoryExists && !gpuCompatLayerEnabled
+                        ? "未找到 modules 目录，无法启用显卡兼容层。"
+                        : gpuCompatLayerEnabled
+                            ? "兼容层已启动，请先关闭后再更换模式。"
+                            : string.Empty;
+                GpuCompatLayerStatusTextBlock.IsVisible = !string.IsNullOrEmpty(GpuCompatLayerStatusTextBlock.Text);
             }
 
             _isUpdatingGpuCompatLayerUi = true;
@@ -763,29 +806,26 @@ namespace LazyBootstrap.UI
                 if (GpuCompatLayerToggleSwitch != null)
                 {
                     GpuCompatLayerToggleSwitch.IsChecked = gpuCompatLayerEnabled;
-                    GpuCompatLayerToggleSwitch.IsEnabled = gpuCompatLayerEnabled || modulesDirectoryExists;
+                    GpuCompatLayerToggleSwitch.IsEnabled = canInteract && (gpuCompatLayerEnabled || modulesDirectoryExists);
                 }
 
-                bool chipsEnabled = !gpuCompatLayerEnabled && modulesDirectoryExists;
-                string renderMode = GpuCompatLayerConfigurator.NormalizeRenderMode(_settingsState.GpuCompatLayerRenderMode);
+                bool modesEnabled = canInteract && !gpuCompatLayerEnabled && modulesDirectoryExists;
+                if (GpuCompatLayerShaderFixRadioButton != null)
+                {
+                    GpuCompatLayerShaderFixRadioButton.IsChecked = renderMode == "shaderfix";
+                    GpuCompatLayerShaderFixRadioButton.IsEnabled = modesEnabled;
+                }
                 if (GpuCompatLayerDx9on12RadioButton != null)
                 {
-                    GpuCompatLayerDx9on12RadioButton.IsChecked = string.Equals(renderMode, "dx9on12", StringComparison.OrdinalIgnoreCase);
-                }
-
-                if (GpuCompatLayerDx9on12ExternalRadioButton != null)
-                {
-                    GpuCompatLayerDx9on12ExternalRadioButton.IsChecked = string.Equals(renderMode, "dx9on12_external", StringComparison.OrdinalIgnoreCase);
+                    GpuCompatLayerDx9on12RadioButton.IsChecked = renderMode == "dx9on12";
+                    GpuCompatLayerDx9on12RadioButton.IsEnabled = modesEnabled;
                 }
 
                 if (GpuCompatLayerDxvkRadioButton != null)
                 {
-                    GpuCompatLayerDxvkRadioButton.IsChecked = string.Equals(renderMode, "dxvk", StringComparison.OrdinalIgnoreCase);
+                    GpuCompatLayerDxvkRadioButton.IsChecked = renderMode == "dxvk";
+                    GpuCompatLayerDxvkRadioButton.IsEnabled = modesEnabled;
                 }
-
-                if (GpuCompatLayerDx9on12RadioButton != null) GpuCompatLayerDx9on12RadioButton.IsEnabled = chipsEnabled;
-                if (GpuCompatLayerDx9on12ExternalRadioButton != null) GpuCompatLayerDx9on12ExternalRadioButton.IsEnabled = chipsEnabled;
-                if (GpuCompatLayerDxvkRadioButton != null) GpuCompatLayerDxvkRadioButton.IsEnabled = chipsEnabled;
             }
             finally
             {
@@ -1344,7 +1384,7 @@ namespace LazyBootstrap.UI
             }
             settings.DisableSpiceFso = _appConfig.ReadBool(AppConfigDefaults.SettingSectionName, DisableFsoConfigKey, false);
             settings.UseSystemSpiceConfig = _appConfig.ReadBool(AppConfigDefaults.SettingSectionName, UseSystemConfigKey, false);
-            settings.GpuCompatLayerRenderMode = GpuCompatLayerConfigurator.NormalizeRenderMode(_appConfig.ReadString(AppConfigDefaults.SettingSectionName, "cl-rendermode", "dx9on12"));
+            settings.GpuCompatLayerRenderMode = GpuCompatLayerConfigurator.NormalizeRenderMode(_appConfig.ReadString(AppConfigDefaults.SettingSectionName, "cl-rendermode", "shaderfix"));
             settings.IsSpiceConfigAvailable = IsSpiceConfigAvailable(settings.UseSystemSpiceConfig);
             settings.SpiceConfigEmptyStateMessage = MissingSpiceConfigMessage;
             RefreshGpuCompatLayerState(settings);
@@ -1590,7 +1630,7 @@ namespace LazyBootstrap.UI
             ArgumentNullException.ThrowIfNull(settings);
             _logger.LogInformation("GPU compatibility layer toggle persistence started.");
 
-            if (settings.GpuCompatLayerEnabled && !GetGpuCompatLayerRuntimeState().IsFullyApplied)
+            if (settings.GpuCompatLayerEnabled && !GetGpuCompatLayerRuntimeState(settings, out _).IsFullyApplied)
             {
                 return ConfirmAndEnableGpuCompatLayerAsync(settings);
             }
@@ -1746,9 +1786,16 @@ namespace LazyBootstrap.UI
         private async Task ConfirmAndEnableGpuCompatLayerAsync(SettingsState settings)
         {
             _logger.LogInformation("GPU compatibility layer confirmation dialog opened.");
+            var renderMode = GpuCompatLayerConfigurator.NormalizeRenderMode(settings.GpuCompatLayerRenderMode);
+            string methodName = renderMode switch
+            {
+                "dxvk" => "Vulkan 转译（DXVK）",
+                "dx9on12" => "DirectX 12 转译（DX9On12）",
+                _ => "仅着色器修复（ShaderFix）"
+            };
             var confirmed = await ShowDialogAsync(
-                "启用显卡兼容层",
-                "即将启用显卡兼容层，请确认你的显卡为 AMD 或者 Intel ，否则请勿开启。\n你确定要继续吗？",
+                $"启用{methodName}",
+                $"即将启用{methodName}并自动配置相关补丁。\n请确认你的显卡为 AMD 或 Intel，否则请勿开启。\n你确定要继续吗？",
                 "确认",
                 "取消",
                 NotificationType.Warning);
@@ -1760,7 +1807,6 @@ namespace LazyBootstrap.UI
                 return;
             }
 
-            var renderMode = GpuCompatLayerConfigurator.NormalizeRenderMode(settings.GpuCompatLayerRenderMode);
             string spiceXmlPath = _paths.ResolveSpiceXmlPath(settings.UseSystemSpiceConfig);
             if (_gpuCompatLayerConfigurator.TryToggleGpuCompatLayer(
                     true,
@@ -1963,7 +2009,12 @@ namespace LazyBootstrap.UI
 
         private void RefreshGpuCompatLayerState(SettingsState settings)
         {
-            var runtimeState = GetGpuCompatLayerRuntimeState();
+            var runtimeState = GetGpuCompatLayerRuntimeState(settings, out var dllInjection);
+            settings.DllInjection = dllInjection;
+            if (ReferenceEquals(settings, _settingsState))
+            {
+                ApplyDllInjectionStateToUi();
+            }
             var configuredRenderMode = GpuCompatLayerConfigurator.NormalizeRenderMode(settings.GpuCompatLayerRenderMode);
 
             settings.GpuCompatLayerRenderMode = string.IsNullOrWhiteSpace(runtimeState.DetectedRenderMode)
@@ -2157,13 +2208,17 @@ namespace LazyBootstrap.UI
             return choices;
         }
 
-        private GpuCompatLayerRuntimeState GetGpuCompatLayerRuntimeState()
+        private GpuCompatLayerRuntimeState GetGpuCompatLayerRuntimeState(SettingsState settings, out string dllInjection)
         {
+            dllInjection = string.Empty;
             try
             {
+                var optionValues = ReadSpiceOptionValues(_paths.ResolveSpiceXmlPath(settings.UseSystemSpiceConfig));
+                dllInjection = optionValues.TryGetValue("k", out var value) ? value : string.Empty;
                 return GpuCompatLayerConfigurator.DetectRuntimeState(
                     _paths.GetContentsDirectoryPath(),
-                    _paths.GetBundledLibsDirectoryPath());
+                    _paths.GetBundledLibsDirectoryPath(),
+                    dllInjection);
             }
             catch (Exception ex)
             {

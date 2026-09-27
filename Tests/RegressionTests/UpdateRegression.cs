@@ -176,7 +176,7 @@ internal static partial class UpdateRegression
             var (game, package) = Pack(root, Copy("source/a", path)); Put(package, "source/a", "new"); Seal(package);
             Reject(() => Apply(game, package)); CheckNoTransaction(game);
         });
-        RunChecksumTests(); RunXmlTests(); RunProcessTests(); RunConfigTests(); RunSpiceDllTests(); RunLogTests();
+        RunChecksumTests(); RunXmlTests(); RunProcessTests(); RunConfigTests(); RunSpiceDllTests(); RunGpuCompatTests(); RunLogTests();
         return _failed;
     }
 
