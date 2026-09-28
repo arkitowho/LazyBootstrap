@@ -252,14 +252,24 @@ namespace LazyBootstrap.UI
             try
             {
                 updateState?.Invoke();
-                await PersistGeneralSettingsAsync(_displayState);
+                if (wasEnabled != _displayState.IsDisplayConfigurationEnabled)
+                    SynchronizeDisplayDetectionWithConfiguration();
                 ApplyDisplayStateToUi();
+                if (!wasEnabled && _displayState.IsDisplayConfigurationEnabled)
+                {
+                    await RequestDisplayListRefreshAsync("ConfigurationEnabled", waitForCurrent: true);
+                    // The user may disable configuration or close the window while discovery is running.
+                    if (!_displayState.IsDisplayConfigurationEnabled || _displayRefreshCoordinator.IsDisposed) return;
+                }
+                // Enabling saves the resolved selection and mode options, not the pre-discovery state.
+                await PersistGeneralSettingsAsync(_displayState);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Persist display configuration option failed.");
                 _displayState.IsDisplayConfigurationEnabled = wasEnabled;
                 _displayState.IsDualDisplay = wasDualDisplay;
+                SynchronizeDisplayDetectionWithConfiguration();
                 ShowErrorToast("显示器配置失败", ex.Message);
                 ApplyDisplayStateToUi();
             }
@@ -447,7 +457,7 @@ namespace LazyBootstrap.UI
             var selectedTarget = _displayState.SelectedTarget;
 
             if (DisplayConfigEnabledToggleSwitch != null) DisplayConfigEnabledToggleSwitch.IsEnabled = canConfigure;
-            if (RefreshDisplaysButton != null) RefreshDisplaysButton.IsEnabled = canConfigure && !_isRefreshingDisplays;
+            if (RefreshDisplaysButton != null) RefreshDisplaysButton.IsEnabled = enabled && !_isRefreshingDisplays;
             if (DisplayModeComboBox != null) DisplayModeComboBox.IsEnabled = canConfigure;
             if (ExitRestoreToggleSwitch != null) ExitRestoreToggleSwitch.IsEnabled = canConfigure;
 

@@ -95,6 +95,59 @@ internal static class DisplayRegression
             catalog.Update(await coordinator.RunAsync(service.GetDisplays));
             Assert(catalog.Displays.Count == 2, "手动刷新后列表仍只有首次结果");
         }), ref failed);
+        Check("配置未启用时不检测，游戏退出不会绕过开关，启用后才可检测", () => RunAsync(async () =>
+        {
+            using var coordinator = new DisplayRefreshCoordinator(configurationEnabled: false);
+            int calls = 0;
+            await ExpectCanceled(coordinator.RunAsync(() => ++calls));
+            coordinator.SetLaunchState(true, false, true);
+            coordinator.SetLaunchState(false, false, false);
+            await ExpectCanceled(coordinator.RunAsync(() => ++calls));
+            Assert(calls == 0, "配置未启用时仍执行了检测");
+            coordinator.SetConfigurationEnabled(true);
+            Assert(await coordinator.RunAsync(() => ++calls) == 1, "启用配置后无法检测");
+            coordinator.SetLaunchState(false, true, false);
+            coordinator.SetConfigurationEnabled(false);
+            coordinator.SetConfigurationEnabled(true);
+            await ExpectCanceled(coordinator.RunAsync(() => ++calls));
+            Assert(calls == 1, "开关配置绕过了游戏期间的暂停");
+        }), ref failed);
+        Check("关闭配置取消排队检测，重新启用不补执行旧请求", () => RunAsync(async () =>
+        {
+            using var coordinator = new DisplayRefreshCoordinator();
+            using var lease = await coordinator.EnterTransactionAsync();
+            int calls = 0;
+            var queued = coordinator.RunAsync(() => ++calls);
+            coordinator.SetConfigurationEnabled(false);
+            coordinator.SetConfigurationEnabled(true);
+            lease.Dispose();
+            await ExpectCanceled(queued);
+            Assert(calls == 0, "重新启用后仍执行了关闭前的排队检测");
+            Assert(await coordinator.RunAsync(() => ++calls) == 1, "新的检测未执行");
+        }), ref failed);
+        Check("关闭配置丢弃在途结果并保留原目录，重新启用接受新结果", () => RunAsync(async () =>
+        {
+            using var coordinator = new DisplayRefreshCoordinator();
+            using var entered = new ManualResetEventSlim();
+            using var release = new ManualResetEventSlim();
+            var catalog = new DisplayCatalog();
+            catalog.Update(new(new[] { Display("saved", "DISPLAY1") }));
+            var query = coordinator.RunAsync(() =>
+            {
+                entered.Set();
+                if (!release.Wait(5000)) throw new Exception("等待测试释放超时");
+                return new DisplayDiscoveryResult(new[] { Display("old", "DISPLAY2") });
+            });
+            Assert(entered.Wait(5000), "检测未开始");
+            coordinator.SetConfigurationEnabled(false);
+            release.Set();
+            try { catalog.Update(await query); throw new Exception("关闭后仍接受旧结果"); }
+            catch (OperationCanceledException) { }
+            Assert(catalog.Displays.Single().PersistentId == "saved", "关闭检测改写了原目录");
+            coordinator.SetConfigurationEnabled(true);
+            catalog.Update(await coordinator.RunAsync(() => new DisplayDiscoveryResult(new[] { Display("saved", "DISPLAY3") })));
+            Assert(catalog.Displays.Single().DeviceName == "DISPLAY3", "重新启用未接受新结果");
+        }), ref failed);
         Check("显示事务持有期间刷新和模式查询等待，释放后执行", () => RunAsync(async () =>
         {
             using var coordinator = new DisplayRefreshCoordinator();

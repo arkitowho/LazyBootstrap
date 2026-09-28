@@ -40,16 +40,21 @@ namespace LazyBootstrap.UI
             ArgumentNullException.ThrowIfNull(state);
             _logger.LogInformation("Display configuration warm-up started.");
 
-            var discoveryResult = await _displayRefreshCoordinator.RunAsync(_displayConfigurationService.GetDisplays);
-            _displayCatalog.Update(discoveryResult);
-            if (!discoveryResult.Succeeded)
+            state.IsDisplayConfigurationEnabled = _appConfig.ReadBool(AppConfigDefaults.DisplaySectionName, "displayconfigure", false);
+            _displayRefreshCoordinator.SetConfigurationEnabled(state.IsDisplayConfigurationEnabled);
+            if (state.IsDisplayConfigurationEnabled)
             {
-                _logger.LogWarning("Display discovery failed during warm-up: {Error}", discoveryResult.ErrorMessage);
-                ShowWarningToast("读取显示器列表失败", discoveryResult.ErrorMessage);
-            }
-            else
-            {
-                _logger.LogInformation("Display discovery completed. DisplayCount={DisplayCount}", discoveryResult.Displays.Count);
+                var discoveryResult = await _displayRefreshCoordinator.RunAsync(_displayConfigurationService.GetDisplays);
+                _displayCatalog.Update(discoveryResult);
+                if (!discoveryResult.Succeeded)
+                {
+                    _logger.LogWarning("Display discovery failed during warm-up: {Error}", discoveryResult.ErrorMessage);
+                    ShowWarningToast("读取显示器列表失败", discoveryResult.ErrorMessage);
+                }
+                else
+                {
+                    _logger.LogInformation("Display discovery completed. DisplayCount={DisplayCount}", discoveryResult.Displays.Count);
+                }
             }
 
             {
@@ -61,7 +66,6 @@ namespace LazyBootstrap.UI
 
                 EnsureRotationOptions(state);
 
-                state.IsDisplayConfigurationEnabled = _appConfig.ReadBool(AppConfigDefaults.DisplaySectionName, "displayconfigure", false);
                 state.IsDualDisplay = !string.Equals(_appConfig.ReadString(AppConfigDefaults.DisplaySectionName, "mode", "single"), "single", StringComparison.OrdinalIgnoreCase);
                 state.ExitRestore = _appConfig.ReadBool(AppConfigDefaults.DisplaySectionName, "exitrestore", true);
 
@@ -121,7 +125,7 @@ namespace LazyBootstrap.UI
 
         private async Task HandleConfigurationChangedAsync(DisplayConfigurationState state, bool refreshMainOptions, bool refreshSubOptions, bool persist = true)
         {
-            if (IsDisplayDetectionPaused) return;
+            if (!state.IsDisplayConfigurationEnabled || IsDisplayDetectionPaused) return;
             long revision = ++_displayRevision;
             var main = state.SelectedMainDisplay;
             var sub = state.SelectedSubDisplay;
@@ -191,6 +195,8 @@ namespace LazyBootstrap.UI
         private async Task<DisplaySettingsTransactionResult> ApplyDisplayTransactionAsync(DisplayConfigurationRequest request, bool preview = false)
         {
             DisplaySettingsTransactionResult Failure(string message) => new(false, null, new[] { message });
+            if (!request.IsDisplayConfigurationEnabled)
+                return new DisplaySettingsTransactionResult(true, new Dictionary<string, DisplayState>(), Array.Empty<string>());
             if (preview && IsDisplayDetectionPaused) return Failure("游戏启动或运行期间无法预览显示器配置。");
             if (_displayTransactionActive) return Failure("正在处理显示器设置，请稍后重试。");
             _displayTransactionActive = true;

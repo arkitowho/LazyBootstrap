@@ -12,9 +12,25 @@ namespace LazyBootstrap.Services
         private readonly object _queryStateLock = new();
         private CancellationTokenSource _queryGeneration = new();
         private bool _queriesPaused;
+        private bool _configurationEnabled;
+
+        public DisplayRefreshCoordinator(bool configurationEnabled = true)
+        {
+            _configurationEnabled = configurationEnabled;
+        }
 
         public bool IsDisposed => _lifetime.IsCancellationRequested;
         public bool IsPaused { get { lock (_queryStateLock) return _queriesPaused; } }
+
+        public void SetConfigurationEnabled(bool enabled)
+        {
+            lock (_queryStateLock)
+            {
+                if (IsDisposed || enabled == _configurationEnabled) return;
+                _configurationEnabled = enabled;
+                UpdateQueryGeneration();
+            }
+        }
 
         public bool SetLaunchState(bool isLaunching, bool isGameRunning, bool isWorkflowActive)
         {
@@ -23,17 +39,22 @@ namespace LazyBootstrap.Services
                 bool paused = isLaunching || isGameRunning || isWorkflowActive;
                 if (IsDisposed || paused == _queriesPaused) return false;
                 _queriesPaused = paused;
-                if (paused)
-                {
-                    // Cancel queued reads and invalidate results of native calls already in progress.
-                    _queryGeneration.Cancel();
-                }
-                else
-                {
-                    _queryGeneration.Dispose();
-                    _queryGeneration = new CancellationTokenSource();
-                }
+                UpdateQueryGeneration();
                 return true;
+            }
+        }
+
+        private void UpdateQueryGeneration()
+        {
+            if (_queriesPaused || !_configurationEnabled)
+            {
+                // Cancel queued reads and invalidate results of native calls already in progress.
+                _queryGeneration.Cancel();
+            }
+            else if (_queryGeneration.IsCancellationRequested)
+            {
+                _queryGeneration.Dispose();
+                _queryGeneration = new CancellationTokenSource();
             }
         }
 
@@ -42,7 +63,8 @@ namespace LazyBootstrap.Services
             CancellationTokenSource linkedSource;
             lock (_queryStateLock)
             {
-                if (_queriesPaused) throw new OperationCanceledException("Display queries are paused during the game session.");
+                if (!_configurationEnabled || _queriesPaused)
+                    throw new OperationCanceledException("Display queries are disabled or paused.");
                 linkedSource = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token, cancellationToken, _queryGeneration.Token);
             }
             using var linked = linkedSource;

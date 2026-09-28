@@ -12,6 +12,27 @@ internal static partial class UpdateRegression
 {
     private static void RunConfigTests()
     {
+        Test("新建显示配置的分辨率和刷新率保持空，重复启动不填入固定值", root =>
+        {
+            string path = LauncherConfigPreparation.Prepare(root, root);
+            var store = new AppConfigStore(path, null);
+            foreach (string key in new[] { "mainresolution", "subresolution", "mainrefresh", "subrefresh" })
+                Check(store.ReadString("Display", key, null) == string.Empty, $"新建配置预填了 {key}");
+            Check(!store.ReadBool("Display", "displayconfigure", true), "新建配置自动启用了显示设置");
+            string original = File.ReadAllText(path);
+            LauncherConfigPreparation.Prepare(root, root);
+            Equal(root, "config.toml", original);
+        });
+        Test("补齐显示配置使用空值且保留已保存的显示模式", root =>
+        {
+            Put(root, "config.toml", "[Display]\nmainresolution = \"2560x1440\"\nmainrefresh = \"144\"\nsubresolution = \"\"\n");
+            string path = LauncherConfigPreparation.Prepare(root, root);
+            var store = new AppConfigStore(path, null);
+            Check(store.ReadString("Display", "mainresolution") == "2560x1440"
+                && store.ReadString("Display", "mainrefresh") == "144", "补齐配置覆盖了已保存模式");
+            Check(store.ReadString("Display", "subresolution", null) == string.Empty, "补齐配置覆盖了空分辨率");
+            Check(store.ReadString("Display", "subrefresh", null) == string.Empty, "缺失的刷新率未补为空值");
+        });
         Test("共享文档仅修改内存且配置读取不缓存外部变更", root =>
         {
             string path = Path.Combine(root, "config.toml");

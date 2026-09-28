@@ -29,10 +29,10 @@ namespace LazyBootstrap.Serialization
             new ConfigDefaultEntry(DisplaySectionName, "subdisplayid", ""),
             new ConfigDefaultEntry(DisplaySectionName, "subrotation", "0"),
             new ConfigDefaultEntry(DisplaySectionName, "mainrotation", "0"),
-            new ConfigDefaultEntry(DisplaySectionName, "mainresolution", "640x480"),
-            new ConfigDefaultEntry(DisplaySectionName, "subresolution", "640x480"),
-            new ConfigDefaultEntry(DisplaySectionName, "mainrefresh", "59"),
-            new ConfigDefaultEntry(DisplaySectionName, "subrefresh", "59")
+            new ConfigDefaultEntry(DisplaySectionName, "mainresolution", ""),
+            new ConfigDefaultEntry(DisplaySectionName, "subresolution", ""),
+            new ConfigDefaultEntry(DisplaySectionName, "mainrefresh", ""),
+            new ConfigDefaultEntry(DisplaySectionName, "subrefresh", "")
         ];
 
         internal static string CreateDefaultConfigText()
