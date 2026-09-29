@@ -84,6 +84,8 @@ namespace LazyBootstrap.UI
 
             public bool NvidiaPerformanceProfile { get; set; }
 
+            public bool LandscapeMode { get; set; }
+
             public bool SubWindowTopMost { get; set; }
 
             public bool SubForceRender { get; set; }
@@ -554,6 +556,11 @@ namespace LazyBootstrap.UI
             if (NvidiaPerformanceProfileToggleSwitch != null)
             {
                 NvidiaPerformanceProfileToggleSwitch.IsChecked = _settingsState.NvidiaPerformanceProfile;
+            }
+
+            if (LandscapeModeToggleSwitch != null)
+            {
+                LandscapeModeToggleSwitch.IsChecked = _settingsState.LandscapeMode;
             }
 
             if (SubWindowTopMostToggleSwitch != null)
@@ -1153,6 +1160,7 @@ namespace LazyBootstrap.UI
             BindToggleSwitch(WindowTopMostToggleSwitch, v => _settingsState.WindowTopMost = v, PersistSpice);
             BindToggleSwitch(SingleAdapterToggleSwitch, v => _settingsState.SingleAdapter = v, PersistSpice);
             BindToggleSwitch(NvidiaPerformanceProfileToggleSwitch, v => _settingsState.NvidiaPerformanceProfile = v, PersistSpice);
+            BindToggleSwitch(LandscapeModeToggleSwitch, v => _settingsState.LandscapeMode = v, PersistSpice);
             BindToggleSwitch(SubWindowTopMostToggleSwitch, v => _settingsState.SubWindowTopMost = v, PersistSpice);
             BindToggleSwitch(SubForceRenderToggleSwitch, v => _settingsState.SubForceRender = v, PersistSpice);
             BindToggleSwitch(CardIoToggleSwitch, v => _settingsState.CardIo = v, PersistSpice);
@@ -1289,6 +1297,7 @@ namespace LazyBootstrap.UI
             CreateStringOptionDescriptor("sp2x-windowsize", state => state.WindowSize, (state, value) => state.WindowSize = value),
             CreateBooleanOptionDescriptor("graphics-force-single-adapter", state => state.SingleAdapter, (state, value) => state.SingleAdapter = value, "/ENABLED"),
             CreateBooleanOptionDescriptor("sp2x-nvprofile", state => state.NvidiaPerformanceProfile, (state, value) => state.NvidiaPerformanceProfile = value, "/ENABLED"),
+            CreateBooleanOptionDescriptor("sdvxlandscape", state => state.LandscapeMode, (state, value) => state.LandscapeMode = value, "/ENABLED"),
             CreateBooleanOptionDescriptor("sdvxwsubtop", state => state.SubWindowTopMost, (state, value) => state.SubWindowTopMost = value, "/ENABLED"),
             CreateBooleanOptionDescriptor("sp2x-sdvxsubredraw", state => state.SubForceRender, (state, value) => state.SubForceRender = value, "/ENABLED"),
             new("sp2x-sdvxasio",
