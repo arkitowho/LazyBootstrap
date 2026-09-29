@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Security.AccessControl;
+using LazyBootstrap.Application;
 using LazyBootstrap.FileSystem;
 using LazyBootstrap.Launcher;
 using LazyBootstrap.Platform;
@@ -12,6 +13,60 @@ internal static partial class UpdateRegression
 {
     private static void RunConfigTests()
     {
+        foreach (bool missingDirectory in new[] { false, true })
+        Test("配置读取弹窗不重复缺失原因：" + (missingDirectory ? "目录" : "文件"), root =>
+        {
+            string path = Path.Combine(root, missingDirectory ? "missing/config.toml" : "config.toml");
+            var store = new AppConfigStore(path, null);
+            try { store.ReadExistingText(); throw new Exception("预期读取缺失配置失败"); }
+            catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+            {
+                Check(missingDirectory ? ex is DirectoryNotFoundException : ex is FileNotFoundException, "缺失场景未覆盖预期异常");
+                string original = ex.ToString();
+                string message = StartupConfigError.Format(path, ex);
+                Check(message == $"无法读取配置：{path}\n\n请通过外层 Launcher（启动.exe）启动以准备配置。", "仍有重复缺失说明或丢失恢复建议");
+                Check(ex.ToString() == original, "格式化改变了供日志使用的原始异常");
+            }
+            Check(!File.Exists(path), "弹窗处理创建了配置");
+        });
+        Test("配置格式错误弹窗仅显示一次路径并保留解析详情", root =>
+        {
+            const string broken = "[Setting\ninvalid";
+            string path = Path.Combine(root, "config.toml");
+            File.WriteAllText(path, broken);
+            var store = new AppConfigStore(path, null);
+            try { store.ReadExistingText(); throw new Exception("预期配置格式错误"); }
+            catch (InvalidDataException ex)
+            {
+                string message = StartupConfigError.Format(path, ex);
+                Check(message.StartsWith(ex.Message + "\n\n", StringComparison.Ordinal), "配置错误原文被修改");
+                Check(message.Split(path).Length == 2 && !message.Contains("无法读取配置"), "重复添加了配置路径或外层说明");
+                Check(message.Contains(AppConfigDocument.Validate(broken)), "丢失了解析器原始详情");
+                Check(message.EndsWith("请通过外层 Launcher（启动.exe）启动以准备配置。", StringComparison.Ordinal), "丢失恢复建议");
+            }
+            Equal(root, "config.toml", broken);
+        });
+        foreach (bool denyRead in new[] { false, true })
+        Test("配置读取弹窗保留系统原因：" + (denyRead ? "权限不足" : "文件占用"), root =>
+        {
+            string path = LauncherConfigPreparation.Prepare(root, root);
+            using var held = denyRead ? null : File.Open(path, FileMode.Open, FileAccess.Read, FileShare.None);
+            using var denied = denyRead ? new DeniedAccess(path, FileSystemRights.ReadData) : null;
+            try { new AppConfigStore(path, null).ReadExistingText(); throw new Exception("预期系统访问错误"); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                string message = StartupConfigError.Format(path, ex);
+                Check(message.Contains("\n\n" + ex.Message + "\n\n"), "系统访问错误未按原文保留");
+                Check(message.StartsWith($"无法读取配置：{path}", StringComparison.Ordinal), "丢失失败操作或配置路径");
+            }
+        });
+        Test("配置读取弹窗保留未知英文异常且不按文字猜测类型", root =>
+        {
+            const string reason = "Could not find file 'dependency.dll'. Additional diagnostic: E_TEST_42";
+            var error = new InvalidOperationException(reason);
+            string message = StartupConfigError.Format(Path.Combine(root, "config.toml"), error);
+            Check(message.Contains("\n\n" + reason + "\n\n"), "未知英文错误被翻译或按文字删除");
+        });
         Test("新建显示配置的分辨率和刷新率保持空，重复启动不填入固定值", root =>
         {
             string path = LauncherConfigPreparation.Prepare(root, root);

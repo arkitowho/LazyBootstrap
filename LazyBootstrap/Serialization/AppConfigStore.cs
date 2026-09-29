@@ -149,7 +149,7 @@ internal class AppConfigStore
         var validationError = AppConfigDocument.Validate(content ?? string.Empty);
         if (!string.IsNullOrWhiteSpace(validationError))
         {
-            throw new InvalidDataException($"Serialized TOML failed validation: {validationError}");
+            throw new InvalidDataException($"生成的 TOML 配置校验失败：{validationError}");
         }
 
         if (!SafeFileWriter.TryReplaceExistingText(_path, content ?? string.Empty, ValidateTomlFile, out var error))

@@ -33,7 +33,7 @@ namespace LazyBootstrap
                 {
                     Log.Error(ex, "Configuration could not be read.");
                     MessageBoxW(nint.Zero,
-                        $"无法读取配置：{AppServices.Paths.ConfigFilePath}\n\n{ex.Message}\n\n请通过外层 Launcher（启动.exe）启动以准备配置。",
+                        StartupConfigError.Format(AppServices.Paths.ConfigFilePath, ex),
                         "配置读取失败", 0x10);
                     Environment.ExitCode = 1;
                     return;
