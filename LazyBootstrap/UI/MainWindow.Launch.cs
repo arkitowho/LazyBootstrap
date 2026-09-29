@@ -1221,10 +1221,10 @@ namespace LazyBootstrap.UI
         {
             if (useSystemConfig)
             {
-                return "-cfg -forcesoftware";
+                return "-cfg -forcesoftware -y log_cfg.txt";
             }
 
-            return $"-cfg -cmdoverride -forcesoftware -cfgpath {LazyCfgRelative} -patchcfgpath {LazyPatchRelative}";
+            return $"-cfg -cmdoverride -forcesoftware -cfgpath {LazyCfgRelative} -patchcfgpath {LazyPatchRelative} -y log_cfg.txt";
         }
     }
 }
