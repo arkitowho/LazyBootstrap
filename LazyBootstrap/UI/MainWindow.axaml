@@ -199,7 +199,7 @@
                                                     </suki:SettingsLayoutItem.Content>
                                                 </suki:SettingsLayoutItem>
 
-                                                <suki:SettingsLayoutItem Header="AMD/Intel显卡专属">
+                                                <suki:SettingsLayoutItem Header="AMD/Intel显卡兼容层">
                                                     <suki:SettingsLayoutItem.Content>
                                                         <suki:GlassCard Margin="0,18,0,0" Padding="18">
                                                             <StackPanel Spacing="16">
@@ -207,7 +207,7 @@
                                                                     <StackPanel Spacing="6" VerticalAlignment="Center">
                                                                         <TextBlock Text="启动兼容层"
                                                                                    FontWeight="DemiBold" TextWrapping="Wrap" />
-                                                                        <TextBlock Text="为 AMD / Intel 显卡配置兼容补丁"
+                                                                        <TextBlock Text="配置必备NVIDIA库与图形修复"
                                                                                    Foreground="{DynamicResource SukiLowText}"
                                                                                    FontSize="12" TextWrapping="Wrap" />
                                                                     </StackPanel>
