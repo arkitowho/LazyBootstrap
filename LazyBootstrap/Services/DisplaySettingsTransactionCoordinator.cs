@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 
 namespace LazyBootstrap.Services
 {
@@ -58,7 +59,7 @@ namespace LazyBootstrap.Services
             _displayConfigurationService = displayConfigurationService;
         }
 
-        public DisplaySettingsTransactionResult Apply(IReadOnlyList<DisplaySettingsRequest> requests)
+        public DisplaySettingsTransactionResult Apply(IReadOnlyList<DisplaySettingsRequest> requests, CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(requests);
 
@@ -72,6 +73,7 @@ namespace LazyBootstrap.Services
 
             foreach (var request in normalizedRequests)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var stateResult = _displayConfigurationService.GetCurrentState(request.DeviceName);
                 if (!stateResult.Succeeded)
                 {
@@ -85,6 +87,11 @@ namespace LazyBootstrap.Services
             var appliedRequests = new List<DisplaySettingsRequest>();
             foreach (var request in normalizedRequests)
             {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    messages.Add("已取消显示器配置，正在还原已应用的设置。");
+                    return new DisplaySettingsTransactionResult(false, RollbackAppliedRequests(appliedRequests, restoreStates, messages), messages);
+                }
                 var applyResult = _displayConfigurationService.ApplyDisplaySettings(
                     request.DeviceName,
                     request.Angle,
@@ -95,6 +102,11 @@ namespace LazyBootstrap.Services
                 if (applyResult.Succeeded)
                 {
                     appliedRequests.Add(request);
+                    if (cancellationToken.IsCancellationRequested)
+                    {
+                        messages.Add("已取消显示器配置，正在还原已应用的设置。");
+                        return new DisplaySettingsTransactionResult(false, RollbackAppliedRequests(appliedRequests, restoreStates, messages), messages);
+                    }
                     continue;
                 }
 
@@ -104,6 +116,20 @@ namespace LazyBootstrap.Services
             }
 
             return new DisplaySettingsTransactionResult(true, restoreStates, messages);
+        }
+
+        public DisplaySettingsTransactionResult Restore(IReadOnlyDictionary<string, DisplayState> states)
+        {
+            var pending = new Dictionary<string, DisplayState>(StringComparer.OrdinalIgnoreCase);
+            var messages = new List<string>();
+            foreach (var state in states.Values)
+            {
+                var result = _displayConfigurationService.RestoreDisplaySettings(state);
+                if (result.Succeeded) continue;
+                pending[state.DeviceName] = state;
+                messages.Add($"还原 {state.DeviceName} 失败: {result.ErrorMessage}");
+            }
+            return new DisplaySettingsTransactionResult(pending.Count == 0, pending, messages);
         }
 
         private static IReadOnlyList<DisplaySettingsRequest> NormalizeRequests(IReadOnlyList<DisplaySettingsRequest> requests, List<string> messages)

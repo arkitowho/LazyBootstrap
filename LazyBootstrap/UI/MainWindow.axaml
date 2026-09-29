@@ -685,11 +685,15 @@
                                             <TextBlock Text="显示器配置" FontSize="22" FontWeight="SemiBold"
                                                        VerticalAlignment="Center" />
                                             <TextBlock Text="点击开关启用自动显示器配置" Opacity="0.7" />
+                                            <TextBlock x:Name="DisplayDiscoveryStatusText" FontSize="12" Opacity="0.7"
+                                                       MaxWidth="260" TextWrapping="Wrap" HorizontalAlignment="Left"
+                                                       Text="显示器配置未启用，不进行检测。" />
                                         </StackPanel>
                                         <Grid Grid.Column="1" />
                                         <ToggleSwitch x:Name="DisplayConfigEnabledToggleSwitch" Grid.Column="2"
                                                       VerticalAlignment="Center" IsChecked="False" />
-                                        <ComboBox x:Name="DisplayModeComboBox" Grid.Column="3" Width="120">
+                                        <ComboBox x:Name="DisplayModeComboBox" Grid.Column="3" Width="120"
+                                                  VerticalAlignment="Center">
                                             <ComboBoxItem Content="单屏" />
                                             <ComboBoxItem Content="双屏" />
                                         </ComboBox>
@@ -829,10 +833,13 @@
                                         </Grid>
                                     </suki:GlassCard>
 
-                                    <Button x:Name="PreviewDisplaySettingsButton" Grid.Row="2" Grid.Column="1"
-                                            Classes="Flat"
-                                            HorizontalAlignment="Right" Content="预览"
-                                            Click="OnPreviewDisplaySettingsClick" />
+                                    <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal"
+                                                HorizontalAlignment="Right" Spacing="10">
+                                        <Button x:Name="RefreshDisplaysButton" Content="重新检测"
+                                                IsEnabled="False" Click="OnRefreshDisplaysClick" />
+                                        <Button x:Name="PreviewDisplaySettingsButton" Classes="Flat"
+                                                Content="预览" Click="OnPreviewDisplaySettingsClick" />
+                                    </StackPanel>
                                 </Grid>
                             </suki:SukiSideMenuItem.PageContent>
                         </suki:SukiSideMenuItem>
