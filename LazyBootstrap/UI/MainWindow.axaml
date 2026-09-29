@@ -482,6 +482,15 @@
                                                                 <TextBlock
                                                                     Text="尝试禁用/调整部分影响帧率与性能的NVIDIA控制面板配置，获得更稳定的帧率"
                                                                     Opacity="0.7" FontSize="12" Margin="0,-20,0,0" />
+                                                                <Grid ColumnDefinitions="*,Auto"
+                                                                      VerticalAlignment="Center">
+                                                                    <TextBlock Text="横屏模式（实验性）"
+                                                                               VerticalAlignment="Center" />
+                                                                    <ToggleSwitch x:Name="LandscapeModeToggleSwitch"
+                                                                                  Grid.Column="1" />
+                                                                </Grid>
+                                                                <TextBlock Text="强制游戏以横屏模式启动" Opacity="0.7"
+                                                                           FontSize="12" Margin="0,-20,0,0" />
                                                             </StackPanel>
                                                         </suki:GlassCard>
                                                     </suki:SettingsLayoutItem.Content>
