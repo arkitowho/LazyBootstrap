@@ -78,10 +78,20 @@ namespace LazyBootstrap.Services
             finally { _gate.Release(); }
         }
 
-        public async Task<IDisposable> EnterTransactionAsync()
+        public async Task<IDisposable> EnterTransactionAsync(CancellationToken cancellationToken = default)
         {
-            await _gate.WaitAsync(_lifetime.Token).ConfigureAwait(false);
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token, cancellationToken);
+            await _gate.WaitAsync(linked.Token).ConfigureAwait(false);
             return new Lease(_gate);
+        }
+
+        // The caller holds a transaction lease; launch validation is allowed while list refreshes are paused.
+        public async Task<DisplayDiscoveryResult> DiscoverForTransactionAsync(Func<DisplayDiscoveryResult> discover, CancellationToken cancellationToken)
+        {
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token, cancellationToken);
+            var result = await Task.Run(discover, linked.Token).ConfigureAwait(false);
+            linked.Token.ThrowIfCancellationRequested();
+            return result;
         }
 
         public async Task WaitForQueriesToFinishAsync(CancellationToken cancellationToken)

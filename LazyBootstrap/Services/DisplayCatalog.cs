@@ -45,5 +45,11 @@ namespace LazyBootstrap.Services
             if (index >= displays.Count && !string.IsNullOrWhiteSpace(legacyIndex)) return null;
             return displays.Count == 0 ? null : displays[Math.Clamp(index, 0, displays.Count - 1)];
         }
+
+        public static DisplayInfo ResolveFresh(DisplayDiscoveryResult discovery, DisplayInfo selected)
+        {
+            if (discovery.Status == DisplayDiscoveryStatus.Failed || selected == null) return null;
+            return Resolve(discovery.Displays, selected.PersistentId, string.Empty, 0, selected.FriendlyName);
+        }
     }
 }

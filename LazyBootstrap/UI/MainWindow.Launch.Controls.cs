@@ -84,22 +84,31 @@ namespace LazyBootstrap.UI
         private void OnStartAsphyxiaDevClick(object sender, RoutedEventArgs e)
             => _ = StartLaunchAsync(true);
 
-        private Task StartLaunchAsync(bool asphyxiaDevOnly)
+        private async Task StartLaunchAsync(bool asphyxiaDevOnly)
         {
-            if (!_launchUiState.CanStartLaunch)
+            if (!_launchUiState.CanStartLaunch || _launchWorkflowLifetime.IsBusy || _isWindowCloseAnimationRunning || _allowImmediateWindowClose)
             {
-                return Task.CompletedTask;
+                return;
             }
 
-            return RunLaunchWorkflowAsync(
-                _launchUiState,
-                new LaunchRequest(
-                    _settingsState.NoAsphyxia,
-                    _settingsState.UseSystemSpiceConfig,
-                    _settingsState.DisableSpiceFso,
-                    _settingsState.ServerAddress,
-                    BuildDisplayConfigurationRequest(),
-                    asphyxiaDevOnly));
+            if (_displayRestoreStates.Count > 0)
+            {
+                ShowWarningToast("显示器还原未完成", "请先点击停止，重试还原显示器设置后再启动。");
+                return;
+            }
+            try
+            {
+                await _launchWorkflowLifetime.RunAsync(() => RunLaunchWorkflowAsync(
+                    _launchUiState,
+                    new LaunchRequest(
+                        _settingsState.NoAsphyxia,
+                        _settingsState.UseSystemSpiceConfig,
+                        _settingsState.DisableSpiceFso,
+                        _settingsState.ServerAddress,
+                        BuildDisplayConfigurationRequest(),
+                        asphyxiaDevOnly)));
+            }
+            finally { NotifyLaunchStateChanged(_launchUiState); }
         }
 
         private void InitializeLaunchControls()
@@ -120,7 +129,7 @@ namespace LazyBootstrap.UI
 
         private void ApplyLaunchStateToUi()
         {
-            bool canStart = _launchUiState.CanStartLaunch;
+            bool canStart = _launchUiState.CanStartLaunch && !_launchWorkflowLifetime.IsBusy && !_isWindowCloseAnimationRunning;
             SetNavigationLocked(!canStart);
 
             if (StartButton != null)

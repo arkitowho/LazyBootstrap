@@ -12,10 +12,12 @@ namespace LazyBootstrap.UI
     {
         private readonly DisplayCatalog _displayCatalog = new();
         private DisplayRefreshCoordinator _displayRefreshCoordinator;
+        private readonly DisplayInitialization _displayInitialization;
+        private DisplayRefreshOutcome _lastDisplayRefreshOutcome = DisplayRefreshOutcome.Deferred;
         private long _displayRevision;
         private bool _isRefreshingDisplays;
         private bool _displayTransactionActive;
-        private Task _displayRefreshTask = Task.CompletedTask;
+        private Task<DisplayRefreshOutcome> _displayRefreshTask = Task.FromResult(DisplayRefreshOutcome.Deferred);
         private bool _displayRefreshQueued;
         private string _pendingDisplayRefreshReason;
 
@@ -25,7 +27,11 @@ namespace LazyBootstrap.UI
         {
             _displayRefreshCoordinator.SetConfigurationEnabled(_displayState.IsDisplayConfigurationEnabled);
             _displayRevision++;
-            if (!_displayState.IsDisplayConfigurationEnabled) _pendingDisplayRefreshReason = null;
+            if (!_displayState.IsDisplayConfigurationEnabled)
+            {
+                _pendingDisplayRefreshReason = null;
+                _displayInitialization.Cancel();
+            }
             UpdateDisplayDiscoveryStatus();
         }
 
@@ -33,7 +39,7 @@ namespace LazyBootstrap.UI
         {
             if (_displayRefreshCoordinator == null || _displayRefreshCoordinator.IsDisposed) return;
             if (!_displayRefreshCoordinator.SetLaunchState(_launchUiState.IsLaunching,
-                    _launchUiState.IsGameRunning, _launchWorkflowCts != null)) return;
+                    _launchUiState.IsGameRunning, _launchWorkflowLifetime.IsBusy)) return;
             _displayRevision++;
             UpdateDisplayLayoutControlsEnabled();
             if (!_displayState.IsDisplayConfigurationEnabled)
@@ -79,6 +85,7 @@ namespace LazyBootstrap.UI
         private void DisposeDisplayRefresh()
         {
             _displayRevision++;
+            _displayInitialization?.Cancel();
             _displayRefreshCoordinator?.Dispose();
             _pendingDisplayRefreshReason = null;
         }
@@ -86,48 +93,55 @@ namespace LazyBootstrap.UI
         private async void OnRefreshDisplaysClick(object sender, RoutedEventArgs e)
             => await RequestDisplayListRefreshAsync("Manual");
 
-        private async Task RequestDisplayListRefreshAsync(string reason, bool waitForCurrent = false)
+        private async Task<DisplayRefreshOutcome> RequestDisplayListRefreshAsync(string reason, bool waitForCurrent = false)
         {
-            if (!_displayState.IsDisplayConfigurationEnabled) return;
+            long generation = _displayInitialization.Generation;
+            if (!_displayState.IsDisplayConfigurationEnabled || _displayRefreshCoordinator.IsDisposed || _isWindowCloseAnimationRunning || _allowImmediateWindowClose)
+                return DisplayRefreshOutcome.Canceled;
             if (IsDisplayDetectionPaused)
             {
                 _pendingDisplayRefreshReason = reason;
-                return;
+                return DisplayRefreshOutcome.Deferred;
             }
             // A refresh started before a transaction may be discarded by the revision check.
             // Wait for it before reading the post-transaction state once.
             while (_isRefreshingDisplays)
             {
-                if (!waitForCurrent) return;
+                if (!waitForCurrent) return DisplayRefreshOutcome.Deferred;
                 await _displayRefreshTask;
             }
-            if (!_displayState.IsDisplayConfigurationEnabled) return;
+            if (!_displayState.IsDisplayConfigurationEnabled || generation != _displayInitialization.Generation) return DisplayRefreshOutcome.Canceled;
             if (IsDisplayDetectionPaused)
             {
                 _pendingDisplayRefreshReason = reason;
-                return;
+                return DisplayRefreshOutcome.Deferred;
             }
-            if (_displayRefreshCoordinator.IsDisposed || _displayTransactionActive ||
-                _allowImmediateWindowClose || _isWindowCloseAnimationRunning) return;
+            if (_displayRefreshCoordinator.IsDisposed || _allowImmediateWindowClose || _isWindowCloseAnimationRunning)
+                return DisplayRefreshOutcome.Canceled;
+            if (_displayTransactionActive)
+            {
+                _pendingDisplayRefreshReason = reason;
+                return DisplayRefreshOutcome.Deferred;
+            }
             _pendingDisplayRefreshReason = null;
             _displayRefreshTask = RefreshDisplayListWithStatusAsync(reason);
-            await _displayRefreshTask;
+            return await _displayRefreshTask;
         }
 
-        private async Task RefreshDisplayListWithStatusAsync(string reason)
+        private async Task<DisplayRefreshOutcome> RefreshDisplayListWithStatusAsync(string reason)
         {
             _isRefreshingDisplays = true;
             UpdateDisplayLayoutControlsEnabled();
+            UpdateDisplayDiscoveryStatus();
             try
             {
-                await RefreshDisplaysAsync(reason);
+                _lastDisplayRefreshOutcome = await RefreshDisplaysAsync(reason);
             }
-            catch (OperationCanceledException) { }
+            catch (OperationCanceledException) { _lastDisplayRefreshOutcome = DisplayRefreshOutcome.Canceled; }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Display refresh failed. Reason={Reason}", reason);
-                if (!_displayRefreshCoordinator.IsDisposed && !IsDisplayDetectionPaused)
-                    DisplayDiscoveryStatusText.Text = "检测失败，请稍后重新检测。";
+                _lastDisplayRefreshOutcome = DisplayRefreshOutcome.Failed;
             }
             finally
             {
@@ -135,29 +149,36 @@ namespace LazyBootstrap.UI
                 if (!_displayRefreshCoordinator.IsDisposed)
                 {
                     UpdateDisplayLayoutControlsEnabled();
-                    if (DisplayDiscoveryStatusText.Text == "正在检测显示器…") UpdateDisplayDiscoveryStatus();
+                    UpdateDisplayDiscoveryStatus();
                     DispatchPendingDisplayRefresh();
                 }
             }
+            return _lastDisplayRefreshOutcome;
         }
 
-        private async Task RefreshDisplaysAsync(string reason)
+        private async Task<DisplayRefreshOutcome> RefreshDisplaysAsync(string reason)
         {
-            if (!_displayState.IsDisplayConfigurationEnabled || _displayTransactionActive || IsDisplayDetectionPaused) return;
+            if (!_displayState.IsDisplayConfigurationEnabled) return DisplayRefreshOutcome.Canceled;
+            if (_displayTransactionActive || IsDisplayDetectionPaused) return DisplayRefreshOutcome.Deferred;
+            long generation = _displayInitialization.Generation;
             long revision = ++_displayRevision;
-            DisplayDiscoveryStatusText.Text = "正在检测显示器…";
             var result = await _displayRefreshCoordinator.RunAsync(_displayConfigurationService.GetDisplays);
-            if (_displayTransactionActive || IsDisplayDetectionPaused || revision != _displayRevision || _displayRefreshCoordinator.IsDisposed) return;
+            if (_displayTransactionActive || IsDisplayDetectionPaused || revision != _displayRevision || _displayRefreshCoordinator.IsDisposed) return DisplayRefreshOutcome.Canceled;
             _logger.LogInformation("Display discovery refreshed. Reason={Reason}, Status={Status}, Adapters={Adapters}, Desktop={Desktop}, Count={Count}, Error={Error}",
                 reason, result.Status, result.AdapterCount, result.DesktopCount, result.Displays.Count, result.ErrorMessage);
             foreach (var display in result.Displays)
                 _logger.LogDebug("Display mapping: {Identity} -> {Device}", display.PersistentId, display.DeviceName);
             ApplyDiscoveredDisplays(result);
             ApplyDisplayStateToUi();
-            await HandleConfigurationChangedAsync(_displayState, true, true, persist: false);
-            if (_displayRefreshCoordinator.IsDisposed || _displayTransactionActive || IsDisplayDetectionPaused) return;
+            var outcome = await HandleConfigurationChangedAsync(_displayState, true, true, persist: false);
+            if (_displayRefreshCoordinator.IsDisposed || _displayTransactionActive || IsDisplayDetectionPaused ||
+                !_displayState.IsDisplayConfigurationEnabled || generation != _displayInitialization.Generation || _isWindowCloseAnimationRunning)
+                return DisplayRefreshOutcome.Canceled;
             ApplyDisplayStateToUi();
-            UpdateDisplayDiscoveryStatus();
+            bool targetsReady = DisplayCatalog.ResolveFresh(result, _displayState.SelectedMainDisplay?.Display)?.IsAvailable == true &&
+                (!_displayState.IsDualDisplay || DisplayCatalog.ResolveFresh(result, _displayState.SelectedSubDisplay?.Display)?.IsAvailable == true);
+            _displayInitialization.TrySave(generation, outcome, targetsReady, () => PersistSelectionState(_displayState));
+            return result.Status == DisplayDiscoveryStatus.Failed ? DisplayRefreshOutcome.Failed : outcome;
         }
 
         private void UpdateDisplayDiscoveryStatus()
@@ -172,6 +193,16 @@ namespace LazyBootstrap.UI
             if (IsDisplayDetectionPaused)
             {
                 DisplayDiscoveryStatusText.Text = "游戏启动或运行中，显示器检测已暂停。";
+                return;
+            }
+            if (_isRefreshingDisplays)
+            {
+                DisplayDiscoveryStatusText.Text = "正在检测显示器…";
+                return;
+            }
+            if (_lastDisplayRefreshOutcome == DisplayRefreshOutcome.Failed)
+            {
+                DisplayDiscoveryStatusText.Text = "检测未完成，请重新检测；已保留原配置。";
                 return;
             }
             DisplayDiscoveryStatusText.Text = string.IsNullOrWhiteSpace(_displayCatalog.StatusMessage)

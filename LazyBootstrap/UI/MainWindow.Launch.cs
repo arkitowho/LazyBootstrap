@@ -29,6 +29,7 @@ namespace LazyBootstrap.UI
         private readonly Queue<string> _logLines = new Queue<string>(MaxLogLines + 64);
         private Process _gameProcess;
         private CancellationTokenSource _launchWorkflowCts;
+        private readonly LaunchWorkflowLifetime _launchWorkflowLifetime;
         private CancellationTokenSource _gameProcessMonitorCts;
         private bool _suppressGameProcessExitHandling;
         private readonly LaunchUiState _launchUiState = new LaunchUiState();
@@ -101,8 +102,29 @@ namespace LazyBootstrap.UI
             }
         }
 
-        private Task StopAndKillProcessesAsync()
+        private async Task StopAndKillProcessesAsync()
         {
+            try
+            {
+                await _launchWorkflowLifetime.StopAsync(() =>
+                {
+                    CancelLaunchWorkflow();
+                    _displayTransactionCancellation?.Cancel();
+                    if (_displayTransactionActive) _dialogManager.DismissDialog();
+                    NotifyLaunchStateChanged(_launchUiState);
+                }, CompleteManualStopAsync);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Manual launch stop cleanup failed.");
+                ShowErrorToast("停止未完成", "清理失败，请检查日志后重试停止。");
+            }
+            finally { NotifyLaunchStateChanged(_launchUiState); }
+        }
+
+        private async Task CompleteManualStopAsync()
+        {
+            if (_displayTransactionCompletion != null) await _displayTransactionCompletion.Task;
             _logger.LogInformation("Manual launch stop and process termination requested.");
             CancelLaunchWorkflow();
             CancelGameProcessMonitoring(suppressExitHandling: true);
@@ -126,10 +148,10 @@ namespace LazyBootstrap.UI
                 killedSpice,
                 killedAsphyxia,
                 restored);
-            ShowInfoToast(
-                "操作完成",
-                $"停止完成：spice64 {killedSpice} 个，asphyxia-core-x64 {killedAsphyxia} 个，显示器恢复 {restored} 个");
-            return Task.CompletedTask;
+            if (_displayRestoreStates.Count > 0)
+                ShowWarningToast("显示器还原未完成", $"进程已停止，仍有 {_displayRestoreStates.Count} 个显示器未还原；可再次点击停止重试。");
+            else
+                ShowInfoToast("操作完成", $"停止完成：spice64 {killedSpice} 个，asphyxia-core-x64 {killedAsphyxia} 个，显示器恢复 {restored} 个");
         }
 
         private async Task RunLaunchWorkflowAsync(LaunchUiState launchState, LaunchRequest request)
@@ -166,6 +188,7 @@ namespace LazyBootstrap.UI
 
             bool handoffToGameSession = false;
             bool startedAsphyxiaForGame = false;
+            bool displaySettingsApplied = false;
 
             try
             {
@@ -242,8 +265,9 @@ namespace LazyBootstrap.UI
                 if (!asphyxiaDevOnly && display.IsDisplayConfigurationEnabled)
                 {
                     AppendLaunchOutput(launchState, "正在应用显示器配置...");
-                    var displayResult = await ApplyDisplayTransactionAsync(display);
+                    var displayResult = await ApplyDisplayTransactionAsync(display, cancellationToken: cancellationToken);
                     bool applySucceeded = displayResult.Succeeded;
+                    displaySettingsApplied = applySucceeded;
                     var restoreStates = displayResult.RestoreStates;
                     var displayMessages = displayResult.Messages;
                     _logger.LogInformation(
@@ -256,6 +280,9 @@ namespace LazyBootstrap.UI
                     {
                         AppendLaunchOutput(launchState, displayMessage, NotificationType.Warning);
                     }
+
+                    // Always accept restore snapshots before observing cancellation.
+                    cancellationToken.ThrowIfCancellationRequested();
 
                     if (!applySucceeded)
                     {
@@ -417,7 +444,7 @@ namespace LazyBootstrap.UI
 
                 if (!handoffToGameSession
                     && _activeLaunchDisplayConfiguration?.IsDisplayConfigurationEnabled == true
-                    && _activeLaunchDisplayConfiguration.ExitRestore
+                    && (_activeLaunchDisplayConfiguration.ExitRestore || cancellationToken.IsCancellationRequested)
                     && _displayRestoreStates.Count > 0)
                 {
                     RestoreAppliedDisplaySettings("启动未完成", shouldRestore: true, logToLaunchOutput: true);
@@ -426,7 +453,9 @@ namespace LazyBootstrap.UI
                 if (!handoffToGameSession)
                 {
                     _logger.LogInformation("Game launch workflow ended without handoff.");
-                    _displayRestoreStates = new Dictionary<string, DisplayState>(StringComparer.OrdinalIgnoreCase);
+                    launchState.IsLaunching = false;
+                    if (displaySettingsApplied && !cancellationToken.IsCancellationRequested && display?.ExitRestore == false)
+                        _displayRestoreStates = new Dictionary<string, DisplayState>(StringComparer.OrdinalIgnoreCase);
                     if (_gameProcess != null)
                     {
                         _gameProcess.Dispose();
@@ -444,8 +473,16 @@ namespace LazyBootstrap.UI
             }
         }
 
-        private Task HandleLaunchWorkflowClosingAsync(DisplayConfigurationRequest display)
+        private async Task HandleLaunchWorkflowClosingAsync(DisplayConfigurationRequest display)
         {
+            _displayWindowLifetime.Cancel();
+            _dialogManager.DismissDialog();
+            await _launchWorkflowLifetime.StopAsync(CancelLaunchWorkflow, () => CompleteWindowLaunchCleanupAsync(display));
+        }
+
+        private async Task CompleteWindowLaunchCleanupAsync(DisplayConfigurationRequest display)
+        {
+            if (_displayTransactionCompletion != null) await _displayTransactionCompletion.Task;
             _logger.LogInformation("Launcher closing cleanup started.");
             CancelLaunchWorkflow();
             CancelGameProcessMonitoring(suppressExitHandling: true);
@@ -462,7 +499,6 @@ namespace LazyBootstrap.UI
 
             RestoreAppliedDisplaySettings("窗口关闭", shouldRestore: display?.ExitRestore == true, logToLaunchOutput: false);
             _logger.LogInformation("Launcher closing cleanup completed.");
-            return Task.CompletedTask;
         }
 
         private void ReplaceLaunchWorkflowCancellationSource(CancellationTokenSource cancellationTokenSource)
@@ -551,26 +587,28 @@ namespace LazyBootstrap.UI
             }
 
             var restoreMessages = new List<string>();
-            int restored = RestoreAppliedDisplaySettings(_displayRestoreStates, restoreMessages);
+            int restored = RestoreAppliedDisplaySettings(_displayRestoreStates, restoreMessages, out var pendingRestoreStates);
+            _displayRestoreStates = pendingRestoreStates;
             _logger.LogInformation(
                 "Display settings restored. Reason={Reason}, RestoredCount={RestoredCount}, MessageCount={MessageCount}",
                 reason,
                 restored,
                 restoreMessages.Count);
+            foreach (var message in restoreMessages)
+                _logger.LogWarning("Display restore incomplete. Reason={Reason}, Error={Error}", reason, message);
 
             if (logToLaunchOutput)
             {
                 AppendLaunchOutput(
                     _launchUiState,
-                    restored > 0 ? $"已恢复 {restored} 个显示器设置。" : "未恢复任何显示器设置。",
-                    restored > 0 ? NotificationType.Information : NotificationType.Warning);
+                    pendingRestoreStates.Count == 0 ? $"已恢复 {restored} 个显示器设置。" : $"已恢复 {restored} 个显示器，仍有 {pendingRestoreStates.Count} 个未恢复。",
+                    pendingRestoreStates.Count == 0 ? NotificationType.Information : NotificationType.Warning);
                 foreach (var restoreMessage in restoreMessages)
                 {
                     AppendLaunchOutput(_launchUiState, restoreMessage, NotificationType.Warning);
                 }
             }
 
-            _displayRestoreStates = new Dictionary<string, DisplayState>(StringComparer.OrdinalIgnoreCase);
             return restored;
         }
 
@@ -801,6 +839,11 @@ namespace LazyBootstrap.UI
                 {
                     RestoreAppliedDisplaySettings("游戏退出", shouldRestore: true, logToLaunchOutput: true);
                 }
+                else if (_activeLaunchDisplayConfiguration?.ExitRestore == false)
+                {
+                    // A completed session intentionally kept its layout; these are not failed restores.
+                    _displayRestoreStates = new Dictionary<string, DisplayState>(StringComparer.OrdinalIgnoreCase);
+                }
             }
             catch (Exception ex)
             {
@@ -825,8 +868,6 @@ namespace LazyBootstrap.UI
 
                     RestoreLauncherWindow();
                 }
-
-                _displayRestoreStates = new Dictionary<string, DisplayState>(StringComparer.OrdinalIgnoreCase);
 
                 if (ReferenceEquals(_gameProcess, exitedProcess))
                 {
@@ -1000,6 +1041,7 @@ namespace LazyBootstrap.UI
         {
             Dispatcher.UIThread.Post(() =>
             {
+                if (_isWindowCloseAnimationRunning || _allowImmediateWindowClose) return;
                 if (WindowState == WindowState.Minimized)
                 {
                     WindowState = WindowState.Normal;

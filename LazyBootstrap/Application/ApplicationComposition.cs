@@ -83,6 +83,8 @@ namespace LazyBootstrap.Application
                     displayConfigurationService,
                     displayTransactionCoordinator,
                     new DisplayRefreshCoordinator(configurationEnabled: false),
+                    new DisplayInitialization(),
+                    new LaunchWorkflowLifetime(),
                     savedataTransferService,
                     dialogManager,
                     toastManager,

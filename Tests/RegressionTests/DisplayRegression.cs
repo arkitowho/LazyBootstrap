@@ -228,7 +228,7 @@ internal static class DisplayRegression
             try { await query; throw new Exception("关闭后仍返回可应用的结果"); }
             catch (OperationCanceledException) { }
         }), ref failed);
-        return failed;
+        return failed + DisplayWorkflowRegression.RunAll();
     }
 
     private static void RunAsync(Func<Task> action) => action().WaitAsync(TimeSpan.FromSeconds(15)).GetAwaiter().GetResult();

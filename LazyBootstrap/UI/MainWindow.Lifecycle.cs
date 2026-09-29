@@ -89,13 +89,19 @@ namespace LazyBootstrap.UI
             }
 
             _isWindowCloseAnimationRunning = true;
+            DisposeDisplayRefresh();
 
             try
             {
+                await HandleLaunchClosingAsync();
                 if (!await TryPlayNativeWindowFadeAsync(byte.MaxValue, 0))
                 {
                     await CreateWindowOpacityAnimation(Math.Clamp(Opacity, 0d, 1d), 0d).RunAsync(this, CancellationToken.None);
                 }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Window close cleanup failed.");
             }
             finally
             {
@@ -226,14 +232,6 @@ namespace LazyBootstrap.UI
         {
             AsioDriverRegistry.DisposeControlPanelDrivers();
             ReleaseLaunchControls();
-            try
-            {
-                HandleLaunchClosingAsync().ConfigureAwait(false).GetAwaiter().GetResult();
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Final window close cleanup failed.");
-            }
         }
     }
 }

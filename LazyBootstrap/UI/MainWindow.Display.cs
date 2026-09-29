@@ -79,7 +79,10 @@ namespace LazyBootstrap.UI
 
         private async Task HandleDisplayConfigurationChangedAsync(bool refreshMainOptions, bool refreshSubOptions)
         {
-            await HandleConfigurationChangedAsync(_displayState, refreshMainOptions, refreshSubOptions);
+            if (_displayInitialization.IsPending)
+                await RequestDisplayListRefreshAsync("ConfigurationChanged", waitForCurrent: true);
+            else
+                await HandleConfigurationChangedAsync(_displayState, refreshMainOptions, refreshSubOptions);
             ApplyDisplayStateToUi();
         }
 
@@ -252,16 +255,15 @@ namespace LazyBootstrap.UI
             try
             {
                 updateState?.Invoke();
+                if (!wasEnabled && _displayState.IsDisplayConfigurationEnabled) _displayInitialization.Begin();
                 if (wasEnabled != _displayState.IsDisplayConfigurationEnabled)
                     SynchronizeDisplayDetectionWithConfiguration();
                 ApplyDisplayStateToUi();
-                if (!wasEnabled && _displayState.IsDisplayConfigurationEnabled)
+                if (_displayInitialization.IsPending && _displayState.IsDisplayConfigurationEnabled)
                 {
                     await RequestDisplayListRefreshAsync("ConfigurationEnabled", waitForCurrent: true);
-                    // The user may disable configuration or close the window while discovery is running.
-                    if (!_displayState.IsDisplayConfigurationEnabled || _displayRefreshCoordinator.IsDisposed) return;
+                    return;
                 }
-                // Enabling saves the resolved selection and mode options, not the pre-discovery state.
                 await PersistGeneralSettingsAsync(_displayState);
             }
             catch (Exception ex)
@@ -450,16 +452,16 @@ namespace LazyBootstrap.UI
 
         private void UpdateDisplayLayoutControlsEnabled()
         {
-            bool canConfigure = !_displayTransactionActive && !IsDisplayDetectionPaused;
-            bool enabled = _displayState.IsDisplayConfigurationEnabled && canConfigure;
+            bool canConfigure = !_displayTransactionActive && !IsDisplayDetectionPaused && !_isWindowCloseAnimationRunning && !_displayRefreshCoordinator.IsDisposed;
+            bool enabled = _displayState.IsDisplayConfigurationEnabled && canConfigure && !_isRefreshingDisplays;
             bool isDualDisplay = _displayState.IsDualDisplay;
             bool subEnabled = enabled && isDualDisplay;
             var selectedTarget = _displayState.SelectedTarget;
 
             if (DisplayConfigEnabledToggleSwitch != null) DisplayConfigEnabledToggleSwitch.IsEnabled = canConfigure;
             if (RefreshDisplaysButton != null) RefreshDisplaysButton.IsEnabled = enabled && !_isRefreshingDisplays;
-            if (DisplayModeComboBox != null) DisplayModeComboBox.IsEnabled = canConfigure;
-            if (ExitRestoreToggleSwitch != null) ExitRestoreToggleSwitch.IsEnabled = canConfigure;
+            if (DisplayModeComboBox != null) DisplayModeComboBox.IsEnabled = canConfigure && !_isRefreshingDisplays;
+            if (ExitRestoreToggleSwitch != null) ExitRestoreToggleSwitch.IsEnabled = canConfigure && !_isRefreshingDisplays;
 
             if (DisplayConfigDisabledMask != null)
             {

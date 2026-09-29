@@ -3,6 +3,7 @@ using SystemEnvironment = System.Environment;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Xml.Linq;
 using Avalonia.Controls.Notifications;
@@ -26,6 +27,9 @@ namespace LazyBootstrap.UI
 
         private WindowsDisplayConfigurationService _displayConfigurationService = null!;
         private DisplaySettingsTransactionCoordinator _displaySettingsTransactionCoordinator = null!;
+        private readonly CancellationTokenSource _displayWindowLifetime = new();
+        private CancellationTokenSource _displayTransactionCancellation;
+        private TaskCompletionSource _displayTransactionCompletion;
 
         private void InitializeDisplayServices(
             WindowsDisplayConfigurationService displayConfigurationService,
@@ -111,6 +115,7 @@ namespace LazyBootstrap.UI
 
             if (state.IsDisplayConfigurationEnabled)
             {
+                if (_displayInitialization.IsPending) return Task.CompletedTask;
                 PersistSelectionState(state);
                 return Task.CompletedTask;
             }
@@ -123,9 +128,10 @@ namespace LazyBootstrap.UI
             return Task.CompletedTask;
         }
 
-        private async Task HandleConfigurationChangedAsync(DisplayConfigurationState state, bool refreshMainOptions, bool refreshSubOptions, bool persist = true)
+        private async Task<DisplayRefreshOutcome> HandleConfigurationChangedAsync(DisplayConfigurationState state, bool refreshMainOptions, bool refreshSubOptions, bool persist = true)
         {
-            if (!state.IsDisplayConfigurationEnabled || IsDisplayDetectionPaused) return;
+            if (!state.IsDisplayConfigurationEnabled) return DisplayRefreshOutcome.Canceled;
+            if (IsDisplayDetectionPaused) return DisplayRefreshOutcome.Deferred;
             long revision = ++_displayRevision;
             var main = state.SelectedMainDisplay;
             var sub = state.SelectedSubDisplay;
@@ -136,7 +142,7 @@ namespace LazyBootstrap.UI
             string mainRefresh = state.SelectedMainRefreshRate;
             string subRefresh = state.SelectedSubRefreshRate;
             // Save user intent before awaiting native calls; discovery refresh never writes configuration.
-            if (persist) PersistSelectionState(state);
+            if (persist && !_displayInitialization.IsPending) PersistSelectionState(state);
             try
             {
                 var results = await _displayRefreshCoordinator.RunAsync(() =>
@@ -151,7 +157,7 @@ namespace LazyBootstrap.UI
                         ? _displayConfigurationService.GetCurrentState(sub.Display.DeviceName) : null;
                     return (mainOptions, subOptions, mainState, subState);
                 });
-                if (revision != _displayRevision || _displayRefreshCoordinator.IsDisposed || _displayTransactionActive || IsDisplayDetectionPaused) return;
+                if (revision != _displayRevision || _displayRefreshCoordinator.IsDisposed || _displayTransactionActive || IsDisplayDetectionPaused) return DisplayRefreshOutcome.Canceled;
                 if (refreshMainOptions)
                 {
                     ReplaceCollection(state.MainResolutions, results.mainOptions.Resolutions);
@@ -170,13 +176,17 @@ namespace LazyBootstrap.UI
                 }
                 UpdateDisplayInfo(state, true, results.mainState);
                 UpdateDisplayInfo(state, false, results.subState);
-                if (persist) PersistSelectionState(state);
+                if (persist && !_displayInitialization.IsPending) PersistSelectionState(state);
+                return (!refreshMainOptions || results.mainOptions.IsReady) &&
+                    (!state.IsDualDisplay || !refreshSubOptions || results.subOptions.IsReady)
+                    ? DisplayRefreshOutcome.Completed : DisplayRefreshOutcome.Failed;
             }
-            catch (OperationCanceledException) { }
+            catch (OperationCanceledException) { return DisplayRefreshOutcome.Canceled; }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Display configuration refresh failed.");
                 if (!_displayRefreshCoordinator.IsDisposed) ShowErrorToast("显示器配置失败", ex.Message);
+                return DisplayRefreshOutcome.Failed;
             }
         }
 
@@ -192,25 +202,33 @@ namespace LazyBootstrap.UI
                 ShowWarningToast("显示器预览", BuildDiagnosticsMessage(result.Messages));
         }
 
-        private async Task<DisplaySettingsTransactionResult> ApplyDisplayTransactionAsync(DisplayConfigurationRequest request, bool preview = false)
+        private async Task<DisplaySettingsTransactionResult> ApplyDisplayTransactionAsync(DisplayConfigurationRequest request, bool preview = false, CancellationToken cancellationToken = default)
         {
             DisplaySettingsTransactionResult Failure(string message) => new(false, null, new[] { message });
             if (!request.IsDisplayConfigurationEnabled)
                 return new DisplaySettingsTransactionResult(true, new Dictionary<string, DisplayState>(), Array.Empty<string>());
             if (preview && IsDisplayDetectionPaused) return Failure("游戏启动或运行期间无法预览显示器配置。");
             if (_displayTransactionActive) return Failure("正在处理显示器设置，请稍后重试。");
+            using var transactionCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _displayWindowLifetime.Token);
+            cancellationToken = transactionCancellation.Token;
+            _displayTransactionCancellation = transactionCancellation;
+            var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _displayTransactionCompletion = completion;
             _displayTransactionActive = true;
             _displayRevision++;
             UpdateDisplayLayoutControlsEnabled();
             try
             {
-                using var lease = await _displayRefreshCoordinator.EnterTransactionAsync();
-                var discovery = await Task.Run(_displayConfigurationService.GetDisplays);
+                using var lease = await _displayRefreshCoordinator.EnterTransactionAsync(cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                var discovery = await _displayRefreshCoordinator.DiscoverForTransactionAsync(_displayConfigurationService.GetDisplays, cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
                 if (_displayRefreshCoordinator.IsDisposed) return Failure("窗口已关闭，已取消显示器配置。");
-                if (!discovery.Succeeded) return Failure($"无法确认显示器状态，请重新检测后重试：{discovery.ErrorMessage}");
+                if (discovery.Status == DisplayDiscoveryStatus.Failed) return Failure($"无法确认显示器状态，请重新检测后重试：{discovery.ErrorMessage}");
+                if (discovery.Status == DisplayDiscoveryStatus.Partial)
+                    _logger.LogWarning("Display validation uses partial discovery; checking requested targets. Error={Error}", discovery.ErrorMessage);
                 DisplayChoiceOption ResolveTarget(DisplayChoiceOption selected) => selected == null ? null
-                    : new DisplayChoiceOption(DisplayCatalog.Resolve(discovery.Displays, selected.Display.PersistentId,
-                        string.Empty, 0, selected.Display.FriendlyName), selected.DisplayName);
+                    : new DisplayChoiceOption(DisplayCatalog.ResolveFresh(discovery, selected.Display), selected.DisplayName);
                 var main = ResolveTarget(request.SelectedMainDisplay);
                 var sub = request.IsDualDisplay ? ResolveTarget(request.SelectedSubDisplay) : request.SelectedSubDisplay;
                 if (main?.Display?.IsAvailable != true)
@@ -222,26 +240,33 @@ namespace LazyBootstrap.UI
                     return Failure("更新 Spice2x 显示器配置失败，已停止启动。");
                 var result = await Task.Run(() =>
                 {
-                    bool succeeded = TryApplyDisplayForLaunch(request, out var restoreStates, out var messages);
+                    cancellationToken.ThrowIfCancellationRequested();
+                    bool succeeded = TryApplyDisplayForLaunch(request, out var restoreStates, out var messages, cancellationToken);
                     return new DisplaySettingsTransactionResult(succeeded, restoreStates, messages);
                 });
-                if (!preview || !result.Succeeded) return result;
+                // No cancellation throw here: launch must receive any outstanding restore snapshots.
+                if (!preview) return result;
+                if (!result.Succeeded)
+                {
+                    PreservePendingRestoreStates(result.RestoreStates);
+                    return result;
+                }
                 bool keep = false;
                 try
                 {
-                    if (!_displayRefreshCoordinator.IsDisposed)
+                    if (!_displayRefreshCoordinator.IsDisposed && !cancellationToken.IsCancellationRequested)
                         keep = await ShowDialogAsync("显示器预览",
                             "已应用当前预览设置。\n\n点击“保持现状”将保留当前结果，点击“还原”将恢复预览前状态。",
-                            "保持现状", "还原", NotificationType.Information, "Basic", "Danger");
+                            "保持现状", "还原", NotificationType.Information, "Basic", "Danger").WaitAsync(cancellationToken);
                 }
                 finally
                 {
                     if (!keep)
                     {
-                        var messages = new List<string>();
-                        await Task.Run(() => RestoreDisplaySettingsCore(result.RestoreStates, messages));
-                        if (messages.Count > 0 && !_displayRefreshCoordinator.IsDisposed)
-                            ShowWarningToast("显示器还原", BuildDiagnosticsMessage(messages));
+                        var restored = await Task.Run(() => _displaySettingsTransactionCoordinator.Restore(result.RestoreStates));
+                        PreservePendingRestoreStates(restored.RestoreStates);
+                        if (restored.Messages.Count > 0 && !_displayRefreshCoordinator.IsDisposed)
+                            ShowWarningToast("显示器还原", BuildDiagnosticsMessage(restored.Messages));
                     }
                 }
                 return result;
@@ -250,6 +275,8 @@ namespace LazyBootstrap.UI
             finally
             {
                 FinishDisplayTransaction();
+                _displayTransactionCancellation = null;
+                completion.TrySetResult();
                 if (preview) await RequestDisplayListRefreshAsync("PreviewCompleted", waitForCurrent: true);
             }
         }
@@ -273,7 +300,8 @@ namespace LazyBootstrap.UI
         private bool TryApplyDisplayForLaunch(
             DisplayConfigurationRequest request,
             out IReadOnlyDictionary<string, DisplayState> restoreStates,
-            out IReadOnlyList<string> messages)
+            out IReadOnlyList<string> messages,
+            CancellationToken cancellationToken = default)
         {
             var mutableRestoreStates = new Dictionary<string, DisplayState>(StringComparer.OrdinalIgnoreCase);
             var mutableMessages = new List<string>();
@@ -302,7 +330,7 @@ namespace LazyBootstrap.UI
                 return false;
             }
 
-            var transactionResult = _displaySettingsTransactionCoordinator.Apply(requests);
+            var transactionResult = _displaySettingsTransactionCoordinator.Apply(requests, cancellationToken);
             mutableRestoreStates = new Dictionary<string, DisplayState>(transactionResult.RestoreStates, StringComparer.OrdinalIgnoreCase);
             mutableMessages.AddRange(transactionResult.Messages);
             restoreStates = mutableRestoreStates;
@@ -318,12 +346,16 @@ namespace LazyBootstrap.UI
 
         private int RestoreAppliedDisplaySettings(
             IReadOnlyDictionary<string, DisplayState> restoreStates,
-            IList<string> messages)
+            IList<string> messages,
+            out IReadOnlyDictionary<string, DisplayState> pendingRestoreStates)
         {
             _displayRevision++;
             try
             {
-                return _displayRefreshCoordinator.RunSynchronous(() => RestoreDisplaySettingsCore(restoreStates, messages));
+                var result = _displayRefreshCoordinator.RunSynchronous(() => _displaySettingsTransactionCoordinator.Restore(restoreStates));
+                pendingRestoreStates = result.RestoreStates;
+                foreach (var message in result.Messages) messages.Add(message);
+                return restoreStates.Count - pendingRestoreStates.Count;
             }
             finally
             {
@@ -332,30 +364,11 @@ namespace LazyBootstrap.UI
             }
         }
 
-        private int RestoreDisplaySettingsCore(
-            IReadOnlyDictionary<string, DisplayState> restoreStates,
-            IList<string> messages)
+        private void PreservePendingRestoreStates(IReadOnlyDictionary<string, DisplayState> pending)
         {
-            int restored = 0;
-            if (restoreStates == null)
-            {
-                return restored;
-            }
-
-            foreach (var state in restoreStates.Values)
-            {
-                var result = _displayConfigurationService.RestoreDisplaySettings(state);
-                if (result.Succeeded)
-                {
-                    restored++;
-                    continue;
-                }
-
-                messages?.Add($"还原 {state.DeviceName} 失败: {result.ErrorMessage}");
-            }
-
-            _logger.LogInformation("Display state restore completed. RestoredCount={RestoredCount}, RequestedCount={RequestedCount}, MessageCount={MessageCount}", restored, restoreStates.Count, messages?.Count ?? 0);
-            return restored;
+            var merged = new Dictionary<string, DisplayState>(_displayRestoreStates, StringComparer.OrdinalIgnoreCase);
+            foreach (var pair in pending) merged[pair.Key] = pair.Value;
+            _displayRestoreStates = merged;
         }
 
         private DisplayModeOptions RefreshDisplayOptions(
@@ -403,7 +416,10 @@ namespace LazyBootstrap.UI
                 selectedRefreshRate = refreshItems.FirstOrDefault() ?? string.Empty;
             }
 
-            return new DisplayModeOptions(resolutionItems, refreshItems, selectedResolution, selectedRefreshRate, tooltip);
+            bool selectionSupported = supportedModesResult.Succeeded && supportedModesResult.Modes.Any(mode =>
+                string.Equals(NormalizeResolutionByRotation(mode.Width, mode.Height, rotation), selectedResolution, StringComparison.OrdinalIgnoreCase) &&
+                mode.RefreshRate.ToString() == selectedRefreshRate);
+            return new DisplayModeOptions(resolutionItems, refreshItems, selectedResolution, selectedRefreshRate, tooltip, selectionSupported);
         }
 
         private static IReadOnlyList<string> BuildResolutionItems(IReadOnlyList<DisplayMode> modes, int rotation, out string highestResolution)
@@ -795,7 +811,8 @@ namespace LazyBootstrap.UI
             IReadOnlyList<string> RefreshRates,
             string SelectedResolution,
             string SelectedRefreshRate,
-            string Tooltip);
+            string Tooltip,
+            bool IsReady = false);
 
 
         private int ReadInt(string section, string key, int defaultValue)

@@ -14,6 +14,9 @@
     <Compile Include="../../LazyBootstrap/Services/WindowsDisplayConfigurationService.cs" Link="WindowsDisplayConfigurationService.cs" />
     <Compile Include="../../LazyBootstrap/Services/DisplayRefreshCoordinator.cs" Link="DisplayRefreshCoordinator.cs" />
     <Compile Include="../../LazyBootstrap/Services/DisplayCatalog.cs" Link="DisplayCatalog.cs" />
+    <Compile Include="../../LazyBootstrap/Services/DisplayInitialization.cs" Link="DisplayInitialization.cs" />
+    <Compile Include="../../LazyBootstrap/Services/LaunchWorkflowLifetime.cs" Link="LaunchWorkflowLifetime.cs" />
+    <Compile Include="../../LazyBootstrap/Services/DisplaySettingsTransactionCoordinator.cs" Link="DisplaySettingsTransactionCoordinator.cs" />
     <Compile Remove="artifacts/**/*.cs" />
     <Compile Include="../../LazyBootstrap/Services/SavedataTransferService.cs" Link="SavedataTransferService.cs" />
     <Compile Include="../../LazyBootstrap/FileSystem/LauncherPaths.cs" Link="LauncherPaths.cs" />
