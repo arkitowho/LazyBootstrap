@@ -609,6 +609,7 @@ namespace LazyBootstrap.UI
         }
 
         private const string NearLinkDllName = "near_link.dll";
+        private const string LayeredFsDllName = "ifs_hook.dll";
 
         private void ApplyDllInjectionStateToUi()
         {
@@ -616,7 +617,11 @@ namespace LazyBootstrap.UI
             _isLoadingSettings = true;
             try
             {
-                SetTextBoxTextIfNeeded(DllInjectionTextBox, _settingsState.DllInjection);
+                if (ModsEngineToggleSwitch != null)
+                {
+                    ModsEngineToggleSwitch.IsChecked = SpiceXmlConfigEditor.ContainsInjectedDll(
+                        _settingsState.DllInjection, LayeredFsDllName);
+                }
                 if (NearLinkToggleSwitch != null)
                 {
                     NearLinkToggleSwitch.IsChecked = SpiceXmlConfigEditor.ContainsInjectedDll(
@@ -627,6 +632,26 @@ namespace LazyBootstrap.UI
             {
                 _isLoadingSettings = previousLoadingState;
             }
+        }
+
+        private void OnModsEngineToggleChanged(object sender, RoutedEventArgs e)
+        {
+            if (_isLoadingSettings) return;
+            bool enabled = ModsEngineToggleSwitch.IsChecked == true;
+            string spiceXmlPath = _paths.ResolveSpiceXmlPath(_settingsState.UseSystemSpiceConfig);
+            if (_spiceXmlConfigEditor.TrySetDllInjectionEnabled(spiceXmlPath, LayeredFsDllName, enabled,
+                    out var value, out var error))
+            {
+                _settingsState.DllInjection = value;
+                _logger.LogInformation("Mod DLL injection updated. Enabled={Enabled}", enabled);
+            }
+            else
+            {
+                _logger.LogWarning("Failed to update DLL injection: {Error}", error);
+                ShowErrorToast("写入配置失败", "无法更新DLL注入设置，请检查配置文件是否可读写。详情请查看日志。");
+                ReloadRuntimeState(_settingsState);
+            }
+            ApplyDllInjectionStateToUi();
         }
 
         private void OnNearLinkToggleChanged(object sender, RoutedEventArgs e)
@@ -1099,18 +1124,9 @@ namespace LazyBootstrap.UI
 
         private void InitializeSpiceSettingsBindings()
         {
-            if (DllInjectionTextBox != null)
+            if (ModsEngineToggleSwitch != null)
             {
-                DllInjectionTextBox.Watermark = "example.dll";
-                DllInjectionTextBox.TextChanged += async (_, _) =>
-                {
-                    if (_isLoadingSettings) return;
-                    string value = DllInjectionTextBox.Text ?? string.Empty;
-                    if (string.Equals(value, _settingsState.DllInjection, StringComparison.Ordinal)) return;
-                    _settingsState.DllInjection = value;
-                    await PersistSpiceSettingsAsync(_settingsState);
-                    ApplyDllInjectionStateToUi();
-                };
+                ModsEngineToggleSwitch.IsCheckedChanged += OnModsEngineToggleChanged;
             }
 
             if (NearLinkToggleSwitch != null)

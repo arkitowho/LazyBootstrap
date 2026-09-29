@@ -379,11 +379,11 @@
                                                     <suki:SettingsLayoutItem.Content>
                                                         <suki:GlassCard Margin="0,18,0,0" Padding="18">
                                                             <StackPanel Spacing="12">
-                                                                <Grid ColumnDefinitions="96,*" ColumnSpacing="8"
+                                                                <Grid ColumnDefinitions="*,Auto"
                                                                       VerticalAlignment="Center">
-                                                                    <TextBlock Text="DLL注入" VerticalAlignment="Center" />
-                                                                    <TextBox x:Name="DllInjectionTextBox"
-                                                                             Grid.Column="1" />
+                                                                    <TextBlock Text="启用模组" VerticalAlignment="Center" />
+                                                                    <ToggleSwitch x:Name="ModsEngineToggleSwitch"
+                                                                                  Grid.Column="1" />
                                                                 </Grid>
                                                                 <Grid ColumnDefinitions="*,Auto"
                                                                       VerticalAlignment="Center">
