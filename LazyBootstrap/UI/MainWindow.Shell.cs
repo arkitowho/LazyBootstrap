@@ -46,7 +46,8 @@ namespace LazyBootstrap.UI
 
         private void OnMainSideMenuSelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            if (_isRestoringSideMenuSelection || MainSideMenu == null)
+            // SelectionChanged also bubbles from the ComboBoxes inside the current page.
+            if (_isRestoringSideMenuSelection || MainSideMenu == null || !ReferenceEquals(e.Source, MainSideMenu))
             {
                 return;
             }

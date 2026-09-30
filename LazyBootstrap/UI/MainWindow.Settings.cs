@@ -1436,7 +1436,7 @@ namespace LazyBootstrap.UI
             return Task.CompletedTask;
         }
 
-        private async Task LoadDeferredSettingsStateAsync(SettingsState settings)
+        private async Task LoadDeferredSettingsStateAsync(SettingsState settings, bool preserveCurrentSelection = true)
         {
             ArgumentNullException.ThrowIfNull(settings);
             _logger.LogInformation("Deferred settings warm-up started.");
@@ -1449,9 +1449,9 @@ namespace LazyBootstrap.UI
                 return;
             }
 
-            var currentConfiguredAsioDriverName = settings.ConfiguredAsioDriverName;
-            var currentNetworkIp = settings.NetworkAdapterIp;
-            var currentNetworkSubnet = settings.NetworkAdapterSubnet;
+            var currentConfiguredAsioDriverName = preserveCurrentSelection ? settings.ConfiguredAsioDriverName : string.Empty;
+            var currentNetworkIp = preserveCurrentSelection ? settings.NetworkAdapterIp : string.Empty;
+            var currentNetworkSubnet = preserveCurrentSelection ? settings.NetworkAdapterSubnet : string.Empty;
 
             var deferredState = await Task.Run(() =>
             {
@@ -1717,7 +1717,7 @@ namespace LazyBootstrap.UI
             string arguments = Spice64CommandLine.BuildConfigEditorArguments(settings.UseSystemSpiceConfig);
             try
             {
-                var process = Process.Start(new ProcessStartInfo
+                using var process = Process.Start(new ProcessStartInfo
                 {
                     FileName = spicePath,
                     Arguments = arguments,
@@ -1735,13 +1735,26 @@ namespace LazyBootstrap.UI
                 _logger.LogInformation("spicecfg editor process started. ProcessId={ProcessId}", process.Id);
                 await process.WaitForExitAsync();
                 _logger.LogInformation("spicecfg editor process exited. ExitCode={ExitCode}", process.ExitCode);
-                await LoadSettingsStateAsync(settings);
-                await LoadDeferredSettingsStateAsync(settings);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "spicecfg editor launch failed.");
                 ShowErrorToast("启动 spice 配置失败", "请检查程序文件是否完整及运行权限后重试。详情请查看日志。");
+                return;
+            }
+
+            try
+            {
+                await LoadSettingsStateAsync(settings);
+                // spicecfg owns the latest XML values, including cleared ASIO/network selections.
+                await LoadDeferredSettingsStateAsync(settings, preserveCurrentSelection: false);
+                _logger.LogInformation("Settings reloaded after spicecfg exit. SpiceXmlPath={SpiceXmlPath}",
+                    _paths.ResolveSpiceXmlPath(settings.UseSystemSpiceConfig));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to reload settings after spicecfg exit.");
+                ShowErrorToast("配置刷新失败", "无法重新读取 spice2x 配置，请检查配置文件是否有效及读取权限后重试。详情请查看日志。");
             }
         }
 
