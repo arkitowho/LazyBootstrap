@@ -758,6 +758,15 @@
                                                                   VerticalAlignment="Center" IsChecked="False" />
                                                 </Grid>
                                                 <Grid ColumnDefinitions="*,Auto" VerticalAlignment="Center">
+                                                    <StackPanel Spacing="4" Margin="0,0,12,0">
+                                                        <TextBlock Text="兼容模式" />
+                                                        <TextBlock Text="默认通过 Spice2x 设置刷新率，开启后直接修改系统刷新率。"
+                                                                   TextWrapping="Wrap" FontSize="12" Opacity="0.7" />
+                                                    </StackPanel>
+                                                    <ToggleSwitch x:Name="DisplayCompatibilityModeToggleSwitch" Grid.Column="1"
+                                                                  VerticalAlignment="Center" IsChecked="False" />
+                                                </Grid>
+                                                <Grid ColumnDefinitions="*,Auto" VerticalAlignment="Center">
                                                     <TextBlock Text="Windows触控屏设置" VerticalAlignment="Center" />
                                                     <Button Grid.Column="1" Content="打开"
                                                             MinWidth="86" Click="OnOpenTouchPanelClick" />

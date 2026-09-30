@@ -6,7 +6,7 @@ namespace LazyBootstrap.Services
 {
     internal sealed class DisplaySettingsRequest
     {
-        public DisplaySettingsRequest(string targetName, string deviceName, int angle, int width, int height, int refreshRate)
+        public DisplaySettingsRequest(string targetName, string deviceName, int angle, int width, int height, int? refreshRate)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(targetName);
             ArgumentException.ThrowIfNullOrWhiteSpace(deviceName);
@@ -29,7 +29,7 @@ namespace LazyBootstrap.Services
 
         public int Height { get; }
 
-        public int RefreshRate { get; }
+        public int? RefreshRate { get; }
     }
 
     internal sealed class DisplaySettingsTransactionResult

@@ -461,14 +461,14 @@ namespace LazyBootstrap.Services
             };
         }
 
-        public DisplayConfigurationResult ApplyDisplaySettings(string deviceName, int angle, int width, int height, int refreshRate)
+        public DisplayConfigurationResult ApplyDisplaySettings(string deviceName, int angle, int width, int height, int? refreshRate)
         {
             if (string.IsNullOrWhiteSpace(deviceName))
             {
                 return DisplayConfigurationResult.Failure("未提供显示器设备名称。");
             }
 
-            if (width <= 0 || height <= 0 || refreshRate <= 0)
+            if (width <= 0 || height <= 0 || refreshRate is <= 0)
             {
                 return DisplayConfigurationResult.Failure("显示器分辨率或刷新率无效。");
             }
@@ -490,8 +490,12 @@ namespace LazyBootstrap.Services
                 devMode.DisplayOrientation = orientation;
                 devMode.PelsWidth = width;
                 devMode.PelsHeight = height;
-                devMode.DisplayFrequency = refreshRate;
-                devMode.Fields = DmDisplayOrientation | DmPelsWidth | DmPelsHeight | DmDisplayFrequency;
+                devMode.Fields = DmDisplayOrientation | DmPelsWidth | DmPelsHeight;
+                if (refreshRate.HasValue)
+                {
+                    devMode.DisplayFrequency = refreshRate.Value;
+                    devMode.Fields |= DmDisplayFrequency;
+                }
 
                 int testResult = TryChangeDisplaySettings(deviceName, ref devMode, CdsTest);
                 if (testResult != DispChangeSuccessful)

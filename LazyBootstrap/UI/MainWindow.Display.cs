@@ -21,6 +21,7 @@ namespace LazyBootstrap.UI
             state.IsDisplayConfigurationEnabled,
             state.IsDualDisplay,
             state.ExitRestore,
+            state.CompatibilityMode,
             state.SelectedMainDisplay,
             state.SelectedSubDisplay,
             state.SelectedMainRotation,
@@ -211,6 +212,15 @@ namespace LazyBootstrap.UI
                     };
                 }
 
+                if (DisplayCompatibilityModeToggleSwitch != null)
+                {
+                    DisplayCompatibilityModeToggleSwitch.IsCheckedChanged += async (_, _) =>
+                    {
+                        await HandleDisplayGeneralSettingChangedAsync(() =>
+                            _displayState.CompatibilityMode = DisplayCompatibilityModeToggleSwitch.IsChecked == true);
+                    };
+                }
+
                 StartDisplayPulseAnimation();
                 _isDisplayLayoutInitialized = true;
             }
@@ -252,6 +262,7 @@ namespace LazyBootstrap.UI
 
             bool wasEnabled = _displayState.IsDisplayConfigurationEnabled;
             bool wasDualDisplay = _displayState.IsDualDisplay;
+            bool wasCompatibilityMode = _displayState.CompatibilityMode;
             try
             {
                 updateState?.Invoke();
@@ -265,12 +276,15 @@ namespace LazyBootstrap.UI
                     return;
                 }
                 await PersistGeneralSettingsAsync(_displayState);
+                UpdateDisplayStartupInfo(_displayState);
+                ApplyDisplayStateToUi();
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Persist display configuration option failed.");
                 _displayState.IsDisplayConfigurationEnabled = wasEnabled;
                 _displayState.IsDualDisplay = wasDualDisplay;
+                _displayState.CompatibilityMode = wasCompatibilityMode;
                 SynchronizeDisplayDetectionWithConfiguration();
                 ShowDisplayConfigurationError();
                 ApplyDisplayStateToUi();
@@ -370,6 +384,11 @@ namespace LazyBootstrap.UI
                     ExitRestoreToggleSwitch.IsChecked = _displayState.ExitRestore;
                 }
 
+                if (DisplayCompatibilityModeToggleSwitch != null)
+                {
+                    DisplayCompatibilityModeToggleSwitch.IsChecked = _displayState.CompatibilityMode;
+                }
+
                 SelectComboBoxItem(MainScreenComboBox, _displayState.SelectedMainDisplay);
                 SelectComboBoxItem(SubScreenComboBox, _displayState.SelectedSubDisplay);
                 SelectComboBoxItem(RotationComboBox, _displayState.SelectedMainRotation);
@@ -462,6 +481,7 @@ namespace LazyBootstrap.UI
             if (RefreshDisplaysButton != null) RefreshDisplaysButton.IsEnabled = enabled && !_isRefreshingDisplays;
             if (DisplayModeComboBox != null) DisplayModeComboBox.IsEnabled = canConfigure && !_isRefreshingDisplays;
             if (ExitRestoreToggleSwitch != null) ExitRestoreToggleSwitch.IsEnabled = canConfigure && !_isRefreshingDisplays;
+            if (DisplayCompatibilityModeToggleSwitch != null) DisplayCompatibilityModeToggleSwitch.IsEnabled = canConfigure && !_isRefreshingDisplays;
 
             if (DisplayConfigDisabledMask != null)
             {
@@ -625,6 +645,7 @@ namespace LazyBootstrap.UI
             public bool IsDisplayConfigurationEnabled { get; set; }
             public bool IsDualDisplay { get; set; }
             public bool ExitRestore { get; set; } = true;
+            public bool CompatibilityMode { get; set; }
             public DisplayChoiceOption SelectedMainDisplay { get; set; }
             public DisplayChoiceOption SelectedSubDisplay { get; set; }
             public RotationOption SelectedMainRotation { get; set; }
@@ -674,6 +695,7 @@ namespace LazyBootstrap.UI
             bool IsDisplayConfigurationEnabled,
             bool IsDualDisplay,
             bool ExitRestore,
+            bool CompatibilityMode,
             DisplayChoiceOption SelectedMainDisplay,
             DisplayChoiceOption SelectedSubDisplay,
             RotationOption SelectedMainRotation,

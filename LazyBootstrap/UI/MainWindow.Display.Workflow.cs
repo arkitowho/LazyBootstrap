@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Threading;
@@ -19,6 +20,8 @@ namespace LazyBootstrap.UI
     {
         private const string MainMonitorOptionName = "mainmonitor";
         private const string SubMonitorOptionName = "sdvxsubmonitor";
+        private const string MainRefreshOptionName = "graphics-force-refresh";
+        private const string SubRefreshOptionName = "graphics-force-refresh-sub";
         private const string MainDisplayIdConfigKey = "maindisplayid";
         private const string SubDisplayIdConfigKey = "subdisplayid";
         private const string LegacyMainScreenConfigKey = "mainscreen";
@@ -44,6 +47,7 @@ namespace LazyBootstrap.UI
             _logger.LogInformation("Display configuration warm-up started.");
 
             state.IsDisplayConfigurationEnabled = _appConfig.ReadBool(AppConfigDefaults.DisplaySectionName, "displayconfigure", false);
+            state.CompatibilityMode = _appConfig.ReadBool(AppConfigDefaults.DisplaySectionName, "compatibilitymode", false);
             _displayRefreshCoordinator.SetConfigurationEnabled(state.IsDisplayConfigurationEnabled);
             if (state.IsDisplayConfigurationEnabled)
             {
@@ -122,7 +126,8 @@ namespace LazyBootstrap.UI
             _appConfig.WriteString(AppConfigDefaults.DisplaySectionName, "displayconfigure", state.IsDisplayConfigurationEnabled.ToString().ToLowerInvariant());
             _appConfig.WriteString(AppConfigDefaults.DisplaySectionName, "mode", state.IsDualDisplay ? "dual" : "single");
             _appConfig.WriteString(AppConfigDefaults.DisplaySectionName, "exitrestore", state.ExitRestore.ToString().ToLowerInvariant());
-            SyncSpiceMonitorOverrides(state);
+            _appConfig.WriteString(AppConfigDefaults.DisplaySectionName, "compatibilitymode", state.CompatibilityMode.ToString().ToLowerInvariant());
+            if (!SyncSpiceMonitorOverrides(state)) ShowDisplayConfigurationError();
             _logger.LogInformation("Display general settings persisted. Enabled={Enabled}, DualDisplay={DualDisplay}, ExitRestore={ExitRestore}", state.IsDisplayConfigurationEnabled, state.IsDualDisplay, state.ExitRestore);
             return Task.CompletedTask;
         }
@@ -330,11 +335,11 @@ namespace LazyBootstrap.UI
             _logger.LogInformation("Applying display configuration for launch.");
             var requests = new List<DisplaySettingsRequest>();
             bool allValid = true;
-            allValid &= TryBuildRequest(request.SelectedMainDisplay, request.SelectedMainRotation?.Angle ?? 0, request.SelectedMainResolution, request.SelectedMainRefreshRate, "主显示器", requests, mutableMessages);
+            allValid &= TryBuildRequest(request.SelectedMainDisplay, request.SelectedMainRotation?.Angle ?? 0, request.SelectedMainResolution, request.SelectedMainRefreshRate, request.CompatibilityMode, "主显示器", requests, mutableMessages);
 
             if (request.IsDualDisplay)
             {
-                allValid &= TryBuildRequest(request.SelectedSubDisplay, request.SelectedSubRotation?.Angle ?? 0, request.SelectedSubResolution, request.SelectedSubRefreshRate, "副显示器", requests, mutableMessages);
+                allValid &= TryBuildRequest(request.SelectedSubDisplay, request.SelectedSubRotation?.Angle ?? 0, request.SelectedSubResolution, request.SelectedSubRefreshRate, request.CompatibilityMode, "副显示器", requests, mutableMessages);
             }
 
             if (!allValid)
@@ -482,9 +487,6 @@ namespace LazyBootstrap.UI
         private void UpdateDisplayInfo(DisplayConfigurationState state, bool isMainTarget, DisplayStateQueryResult stateResult)
         {
             var selectedDisplay = isMainTarget ? state.SelectedMainDisplay : state.SelectedSubDisplay;
-            var rotation = isMainTarget ? state.SelectedMainRotation?.Angle ?? 0 : state.SelectedSubRotation?.Angle ?? 0;
-            var resolution = isMainTarget ? state.SelectedMainResolution : state.SelectedSubResolution;
-            var refreshRate = isMainTarget ? state.SelectedMainRefreshRate : state.SelectedSubRefreshRate;
 
             if (selectedDisplay?.Display == null)
             {
@@ -507,7 +509,7 @@ namespace LazyBootstrap.UI
             var outputInfo = stateResult.Succeeded
                 ? $"设备: {selectedDisplay.Display.FriendlyName} ({selectedDisplay.Display.DeviceName})\n当前: {stateResult.State.Width}x{stateResult.State.Height} @ {stateResult.State.RefreshRate}Hz, {FormatRotationDisplay(_displayConfigurationService.OrientationToAngle(stateResult.State.Orientation))}"
                 : $"设备: {selectedDisplay.Display.FriendlyName} ({selectedDisplay.Display.DeviceName})\n当前: 无法读取，请检查显示器连接后重新检测。详情请查看日志。";
-            var startupInfo = $"旋转: {FormatRotationDisplay(rotation)}\n分辨率: {FormatTextOrFallback(resolution)}\n刷新率: {FormatRefreshRateDisplay(refreshRate)}";
+            var startupInfo = BuildDisplayStartupInfo(state, isMainTarget);
 
             if (isMainTarget)
             {
@@ -521,6 +523,23 @@ namespace LazyBootstrap.UI
             }
         }
 
+        private static string BuildDisplayStartupInfo(DisplayConfigurationState state, bool isMainTarget)
+        {
+            var selectedDisplay = isMainTarget ? state.SelectedMainDisplay : state.SelectedSubDisplay;
+            if (selectedDisplay?.Display == null) return "未设置";
+            var rotation = isMainTarget ? state.SelectedMainRotation?.Angle ?? 0 : state.SelectedSubRotation?.Angle ?? 0;
+            var resolution = isMainTarget ? state.SelectedMainResolution : state.SelectedSubResolution;
+            var refreshRate = isMainTarget ? state.SelectedMainRefreshRate : state.SelectedSubRefreshRate;
+            string refreshSource = state.CompatibilityMode ? "系统设置" : "Spice2x 游戏配置";
+            return $"旋转: {FormatRotationDisplay(rotation)}\n分辨率: {FormatTextOrFallback(resolution)}\n刷新率: {FormatRefreshRateDisplay(refreshRate)}（{refreshSource}）";
+        }
+
+        private static void UpdateDisplayStartupInfo(DisplayConfigurationState state)
+        {
+            state.MainStartupInfo = BuildDisplayStartupInfo(state, true);
+            state.SubStartupInfo = BuildDisplayStartupInfo(state, false);
+        }
+
         private void PersistSelectionState(DisplayConfigurationState state)
         {
             _logger.LogDebug("Persisting display selection state.");
@@ -529,6 +548,7 @@ namespace LazyBootstrap.UI
                 ["displayconfigure"] = state.IsDisplayConfigurationEnabled.ToString().ToLowerInvariant(),
                 ["mode"] = state.IsDualDisplay ? "dual" : "single",
                 ["exitrestore"] = state.ExitRestore.ToString().ToLowerInvariant(),
+                ["compatibilitymode"] = state.CompatibilityMode.ToString().ToLowerInvariant(),
                 [MainDisplayIdConfigKey] = state.SelectedMainDisplay?.Display?.PersistentId ?? string.Empty,
                 [SubDisplayIdConfigKey] = state.SelectedSubDisplay?.Display?.PersistentId ?? string.Empty,
                 ["mainrotation"] = (state.SelectedMainRotation?.Angle ?? 0).ToString(),
@@ -541,7 +561,7 @@ namespace LazyBootstrap.UI
                 state.SelectedMainDisplay != null ? LegacyMainScreenConfigKey : null,
                 state.SelectedSubDisplay != null ? LegacySubScreenConfigKey : null
             }.Where(key => key != null).ToArray());
-            SyncSpiceMonitorOverrides(state);
+            if (!SyncSpiceMonitorOverrides(state)) ShowDisplayConfigurationError();
             _logger.LogDebug("Display selection state persisted.");
         }
 
@@ -567,6 +587,8 @@ namespace LazyBootstrap.UI
         {
             string mainMonitorValue = string.Empty;
             string subMonitorValue = string.Empty;
+            string mainRefreshValue = string.Empty;
+            string subRefreshValue = string.Empty;
 
             if (state.IsDisplayConfigurationEnabled)
             {
@@ -574,6 +596,15 @@ namespace LazyBootstrap.UI
                 subMonitorValue = state.IsDualDisplay
                     ? state.SelectedSubDisplay?.Display?.DeviceName ?? string.Empty
                     : string.Empty;
+                if (!state.CompatibilityMode)
+                {
+                    if (!TryNormalizeSpiceRefreshRate(state.SelectedMainRefreshRate, out mainRefreshValue) ||
+                        (state.IsDualDisplay && !TryNormalizeSpiceRefreshRate(state.SelectedSubRefreshRate, out subRefreshValue)))
+                    {
+                        _logger.LogWarning("Spice display override sync failed because a selected refresh rate is invalid.");
+                        return false;
+                    }
+                }
             }
 
             if (string.IsNullOrWhiteSpace(mainMonitorValue))
@@ -591,11 +622,11 @@ namespace LazyBootstrap.UI
                 string spiceXmlPath = GetActiveSpiceXmlPathForMonitorSync();
                 if (string.IsNullOrWhiteSpace(spiceXmlPath) || !File.Exists(spiceXmlPath))
                 {
-                    _logger.LogDebug("Spice monitor override sync skipped because active spice XML is missing.");
+                    _logger.LogDebug("Spice display override sync skipped because active spice XML is missing.");
                     return !state.IsDisplayConfigurationEnabled;
                 }
 
-                // Pre-check: skip write if the monitor values are already set correctly.
+                // Skip writes only when both output bindings and refresh overrides are current.
                 if (_spiceXmlConfigEditor.TryLoadOptionsContext(
                         spiceXmlPath,
                         LoadOptions.PreserveWhitespace,
@@ -607,9 +638,11 @@ namespace LazyBootstrap.UI
                     string currentMainMonitor = context.GetOptionValue(MainMonitorOptionName) ?? string.Empty;
                     string currentSubMonitor = context.GetOptionValue(SubMonitorOptionName) ?? string.Empty;
                     if (string.Equals(currentMainMonitor, mainMonitorValue, StringComparison.Ordinal)
-                        && string.Equals(currentSubMonitor, subMonitorValue, StringComparison.Ordinal))
+                        && string.Equals(currentSubMonitor, subMonitorValue, StringComparison.Ordinal)
+                        && string.Equals(context.GetOptionValue(MainRefreshOptionName), mainRefreshValue, StringComparison.Ordinal)
+                        && string.Equals(context.GetOptionValue(SubRefreshOptionName), subRefreshValue, StringComparison.Ordinal))
                     {
-                        _logger.LogDebug("Spice monitor override sync skipped because values are already current.");
+                        _logger.LogDebug("Spice display override sync skipped because values are already current.");
                         return true;
                     }
                 }
@@ -619,23 +652,36 @@ namespace LazyBootstrap.UI
                         new[]
                         {
                             new SpiceOptionUpdate(MainMonitorOptionName, mainMonitorValue, false),
-                            new SpiceOptionUpdate(SubMonitorOptionName, subMonitorValue, false)
+                            new SpiceOptionUpdate(SubMonitorOptionName, subMonitorValue, false),
+                            new SpiceOptionUpdate(MainRefreshOptionName, mainRefreshValue, false),
+                            new SpiceOptionUpdate(SubRefreshOptionName, subRefreshValue, false)
                         },
                         out var error))
                 {
-                    _logger.LogWarning("Failed to sync spice monitor overrides: {Error}", error);
+                    _logger.LogWarning("Failed to sync spice display overrides: {Error}", error);
                     return false;
                 }
                 else
                 {
-                    _logger.LogInformation("Spice monitor overrides synced.");
+                    _logger.LogInformation("Spice display overrides synced.");
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed to sync spice monitor overrides.");
+                _logger.LogWarning(ex, "Failed to sync spice display overrides.");
                 return false;
             }
+            return true;
+        }
+
+        private static bool TryNormalizeSpiceRefreshRate(string selectedRate, out string value)
+        {
+            value = string.Empty;
+            // Selections can be empty while the display's supported modes are being refreshed.
+            if (string.IsNullOrWhiteSpace(selectedRate)) return true;
+            if (!int.TryParse(selectedRate, NumberStyles.Integer, CultureInfo.InvariantCulture, out int refreshRate) || refreshRate <= 0)
+                return false;
+            value = refreshRate.ToString(CultureInfo.InvariantCulture);
             return true;
         }
 
@@ -682,6 +728,7 @@ namespace LazyBootstrap.UI
             int rotation,
             string resolution,
             string refreshRate,
+            bool compatibilityMode,
             string targetName,
             List<DisplaySettingsRequest> requests,
             List<string> messages)
@@ -698,10 +745,15 @@ namespace LazyBootstrap.UI
                 return false;
             }
 
-            if (!int.TryParse(refreshRate, out var refreshValue))
+            int? refreshValue = null;
+            if (compatibilityMode)
             {
-                messages.Add($"{targetName}刷新率无效: {refreshRate}");
-                return false;
+                if (!int.TryParse(refreshRate, out int parsedRefresh) || parsedRefresh <= 0)
+                {
+                    messages.Add($"{targetName}刷新率无效: {refreshRate}");
+                    return false;
+                }
+                refreshValue = parsedRefresh;
             }
 
             requests.Add(new DisplaySettingsRequest(targetName, selectedDisplay.Display.DeviceName, rotation, width, height, refreshValue));

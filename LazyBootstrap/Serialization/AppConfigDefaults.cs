@@ -24,6 +24,7 @@ namespace LazyBootstrap.Serialization
 
             new ConfigDefaultEntry(DisplaySectionName, "displayconfigure", "false"),
             new ConfigDefaultEntry(DisplaySectionName, "exitrestore", "true"),
+            new ConfigDefaultEntry(DisplaySectionName, "compatibilitymode", "false"),
             new ConfigDefaultEntry(DisplaySectionName, "mode", "single"),
             new ConfigDefaultEntry(DisplaySectionName, "maindisplayid", ""),
             new ConfigDefaultEntry(DisplaySectionName, "subdisplayid", ""),
