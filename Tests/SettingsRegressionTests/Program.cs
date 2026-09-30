@@ -8,6 +8,8 @@ using System.Threading.Tasks;
 using System.Xml.Linq;
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Media;
+using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using LazyBootstrap;
 using LazyBootstrap.UI;
@@ -39,9 +41,13 @@ internal static class Program
         {
             try
             {
-                await RunAsync();
-                Console.WriteLine("PASS: spicecfg exit updates subdisplay and landscape toggles in both directions on the settings page.");
-                Console.WriteLine("PASS: display compatibility mode persists, switches XML refresh overrides, and preserves output bindings on failure.");
+                await RunAsync(args.Contains("--display-preview"));
+                if (!args.Contains("--display-preview"))
+                {
+                    Console.WriteLine("PASS: spicecfg exit updates subdisplay and landscape toggles in both directions on the settings page.");
+                    Console.WriteLine("PASS: display compatibility mode persists, switches XML refresh overrides, and preserves output bindings on failure.");
+                }
+                Console.WriteLine("PASS: display preview fades its top and bottom edges while preserving screen selection.");
                 exitCode = 0;
             }
             catch (Exception ex) { Console.Error.WriteLine(ex); }
@@ -51,7 +57,7 @@ internal static class Program
         return exitCode;
     }
 
-    private static async Task RunAsync()
+    private static async Task RunAsync(bool previewOnly = false)
     {
         var root = Path.Combine(Path.GetTempPath(), "LazyBootstrap-Settings-" + Guid.NewGuid().ToString("N"));
         var contents = Path.Combine(root, "contents");
@@ -79,6 +85,17 @@ internal static class Program
             window.ShowInTaskbar = false;
             window.Position = new PixelPoint(-32000, -32000);
             window.Show();
+            if (previewOnly)
+            {
+                var display = typeof(MainWindow).GetField("_displayState", PrivateInstance)!.GetValue(window)!;
+                Set(display, "IsDisplayConfigurationEnabled", true);
+                Set(display, "IsDualDisplay", true);
+                Invoke(window, "InitializeDisplayLayoutControls");
+                await VerifyDisplayPreviewFadeAsync(window, Path.Combine(Environment.CurrentDirectory, "outputs", "display-preview.png"));
+                Invoke(window, "StopDisplayAnimation");
+                window.Hide();
+                return;
+            }
             var settings = typeof(MainWindow).GetField("_settingsState", PrivateInstance)!.GetValue(window)!;
             await InvokeAsync(window, "LoadSettingsStateAsync", settings);
             await InvokeAsync(window, "LoadDeferredSettingsStateAsync", settings, false);
@@ -164,6 +181,7 @@ internal static class Program
         Invoke(window, "UpdateDisplayStartupInfo", state);
         Invoke(window, "ApplyDisplayStateToUi");
         Invoke(window, "PersistSelectionState", state);
+        await VerifyDisplayPreviewFadeAsync(window);
         AssertRefresh(xml, "120", "75");
         Assert(Option(xml, "mainmonitor") == "DISPLAY1" && Option(xml, "sdvxsubmonitor") == "DISPLAY2", "Output bindings changed.");
         Assert(Option(xml, "url") == "http://localhost:8083", "Unrelated XML option changed.");
@@ -240,6 +258,69 @@ internal static class Program
         Assert(Option(xml, "mainmonitor") == "" && Option(xml, "sdvxsubmonitor") == "", "Disabled display configuration retained overrides.");
         Assert((string)Get(state, "SelectedMainRefreshRate") == "120" && (string)Get(state, "SelectedSubRefreshRate") == "75",
             "Disabling configuration lost refresh rate selections.");
+    }
+
+    private static async Task VerifyDisplayPreviewFadeAsync(MainWindow window, string? screenshot = null)
+    {
+        var menu = window.FindControl<SukiSideMenu>("MainSideMenu")!;
+        menu.SelectedItem = menu.Items.OfType<SukiSideMenuItem>().Single(item => item.Tag is ShellPage.Display);
+        await Task.Delay(350);
+        var busyArea = window.FindControl<BusyArea>("DisplayConfigDisabledMask")!;
+        var preview = (Grid)busyArea.Content!;
+        if (screenshot != null)
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(screenshot)!);
+            using var bitmap = new RenderTargetBitmap(new PixelSize((int)Math.Ceiling(window.Bounds.Width), (int)Math.Ceiling(window.Bounds.Height)));
+            bitmap.Render(window);
+            bitmap.Save(screenshot);
+        }
+        Assert(preview.OpacityMask is LinearGradientBrush,
+            "Display preview is missing its top and bottom transparency fade.");
+        var mask = (LinearGradientBrush)preview.OpacityMask!;
+        var stops = mask.GradientStops.OrderBy(stop => stop.Offset).ToArray();
+        Assert(mask.StartPoint == RelativePoint.TopLeft && mask.EndPoint == new RelativePoint(0, 1, RelativeUnit.Relative)
+            && stops.Length >= 4 && stops[0].Offset == 0 && stops[0].Color.A == 0
+            && stops[^1].Offset == 1 && stops[^1].Color.A == 0
+            && stops.Any(stop => stop.Offset > 0 && stop.Offset < 0.5 && stop.Color.A == 255)
+            && stops.Any(stop => stop.Offset > 0.5 && stop.Offset < 1 && stop.Color.A == 255),
+            "Display preview fade does not preserve the middle and soften both edges.");
+        var originalHeight = window.Height;
+        try
+        {
+            foreach (double height in new[] { 700d, originalHeight, 1080d })
+            {
+                window.Height = height;
+                await Task.Delay(150);
+                Assert(preview.Bounds.Height > 0 && preview.Bounds.Height <= busyArea.Bounds.Height + 1 && preview.ClipToBounds,
+                    "Display preview fade extends beyond the visible viewport when resized.");
+            }
+        }
+        finally
+        {
+            window.Height = originalHeight;
+            await Task.Delay(150);
+        }
+        foreach (string target in new[] { "Main", "Sub" })
+        {
+            var button = window.FindControl<Button>("Select" + target + "ScreenAreaButton")!;
+            Assert(button.IsVisible && button.IsEnabled, "Preview screen selection is unavailable.");
+            button.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+            Assert(window.FindControl<StackPanel>("Panel" + target + "ScreenConfig")!.IsVisible
+                && window.FindControl<Avalonia.Controls.Shapes.Ellipse>("Dot" + target + "SelectedRing")!.IsVisible,
+                "Fade mask prevented preview screen selection.");
+        }
+        var state = typeof(MainWindow).GetField("_displayState", PrivateInstance)!.GetValue(window)!;
+        Set(state, "IsDualDisplay", false);
+        Invoke(window, "ApplyDisplayStateToUi");
+        Assert(!window.FindControl<Button>("SelectSubScreenAreaButton")!.IsVisible,
+            "Single-display preview exposes sub-screen selection.");
+        Set(state, "IsDualDisplay", true);
+        Set(state, "IsDisplayConfigurationEnabled", false);
+        Invoke(window, "ApplyDisplayStateToUi");
+        Assert(busyArea.IsBusy && busyArea.OpacityMask == null && ReferenceEquals(preview.OpacityMask, mask),
+            "Preview fade affects the disabled-state prompt or disappears when configuration is disabled.");
+        Set(state, "IsDisplayConfigurationEnabled", true);
+        Invoke(window, "ApplyDisplayStateToUi");
     }
 
     private static object Get(object target, string property) => target.GetType().GetProperty(property, BindingFlags.Public | PrivateInstance)!.GetValue(target)!;

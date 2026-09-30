@@ -713,39 +713,49 @@
                                             <suki:BusyArea x:Name="DisplayConfigDisabledMask" IsBusy="True"
                                                            BusyText="显示器配置未启用">
                                                 <Grid HorizontalAlignment="Center" VerticalAlignment="Center"
-                                                      Width="300"
-                                                      Height="540">
-                                                    <Image Source="avares://LazyBootstrap/Assets/Images/cabinet.png"
-                                                           Stretch="Uniform" Width="240" />
-                                                    <Canvas Width="300" Height="540" IsHitTestVisible="False">
-                                                        <Ellipse x:Name="DotMainGlow" Canvas.Left="124"
-                                                                 Canvas.Top="157"
-                                                                 Width="52" Height="52" Fill="#35FFFFFF" />
-                                                        <Ellipse Canvas.Left="139"
-                                                                 Canvas.Top="172"
-                                                                 Width="22" Height="22" Fill="White" />
-                                                        <Ellipse x:Name="DotMainSelectedRing" Canvas.Left="127"
-                                                                 Canvas.Top="160" Width="46" Height="46"
-                                                                 Stroke="#AAFFFFFF"
-                                                                 StrokeThickness="2" IsVisible="False" />
-                                                        <Ellipse x:Name="DotSubGlow" Canvas.Left="124" Canvas.Top="303"
-                                                                 Width="52" Height="52" Fill="#35FFFFFF" />
-                                                        <Ellipse x:Name="DotSubCore" Canvas.Left="139" Canvas.Top="318"
-                                                                 Width="22" Height="22" Fill="White" />
-                                                        <Ellipse x:Name="DotSubSelectedRing" Canvas.Left="127"
-                                                                 Canvas.Top="306"
-                                                                 Width="46" Height="46" Stroke="#AAFFFFFF"
-                                                                 StrokeThickness="2"
-                                                                 IsVisible="False" />
-                                                    </Canvas>
-                                                    <Button x:Name="SelectMainScreenAreaButton" Width="54" Height="54"
-                                                            HorizontalAlignment="Center" VerticalAlignment="Top"
-                                                            Margin="0,155,0,0" Background="Transparent"
-                                                            BorderBrush="Transparent" Click="OnSelectMainDisplayClick" />
-                                                    <Button x:Name="SelectSubScreenAreaButton" Width="54" Height="54"
-                                                            HorizontalAlignment="Center" VerticalAlignment="Top"
-                                                            Margin="0,301,0,0" Background="Transparent"
-                                                            BorderBrush="Transparent" Click="OnSelectSubDisplayClick" />
+                                                      Width="300" MaxHeight="540" ClipToBounds="True">
+                                                    <Grid.OpacityMask>
+                                                        <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
+                                                            <GradientStop Offset="0" Color="Transparent" />
+                                                            <GradientStop Offset="0.12" Color="Black" />
+                                                            <GradientStop Offset="0.88" Color="Black" />
+                                                            <GradientStop Offset="1" Color="Transparent" />
+                                                        </LinearGradientBrush>
+                                                    </Grid.OpacityMask>
+                                                    <Grid HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                          Width="300" Height="540">
+                                                        <Image Source="avares://LazyBootstrap/Assets/Images/cabinet.png"
+                                                               Stretch="Uniform" Width="240" />
+                                                        <Canvas Width="300" Height="540" IsHitTestVisible="False">
+                                                            <Ellipse x:Name="DotMainGlow" Canvas.Left="124"
+                                                                     Canvas.Top="157"
+                                                                     Width="52" Height="52" Fill="#35FFFFFF" />
+                                                            <Ellipse Canvas.Left="139"
+                                                                     Canvas.Top="172"
+                                                                     Width="22" Height="22" Fill="White" />
+                                                            <Ellipse x:Name="DotMainSelectedRing" Canvas.Left="127"
+                                                                     Canvas.Top="160" Width="46" Height="46"
+                                                                     Stroke="#AAFFFFFF"
+                                                                     StrokeThickness="2" IsVisible="False" />
+                                                            <Ellipse x:Name="DotSubGlow" Canvas.Left="124" Canvas.Top="303"
+                                                                     Width="52" Height="52" Fill="#35FFFFFF" />
+                                                            <Ellipse x:Name="DotSubCore" Canvas.Left="139" Canvas.Top="318"
+                                                                     Width="22" Height="22" Fill="White" />
+                                                            <Ellipse x:Name="DotSubSelectedRing" Canvas.Left="127"
+                                                                     Canvas.Top="306"
+                                                                     Width="46" Height="46" Stroke="#AAFFFFFF"
+                                                                     StrokeThickness="2"
+                                                                     IsVisible="False" />
+                                                        </Canvas>
+                                                        <Button x:Name="SelectMainScreenAreaButton" Width="54" Height="54"
+                                                                HorizontalAlignment="Center" VerticalAlignment="Top"
+                                                                Margin="0,155,0,0" Background="Transparent"
+                                                                BorderBrush="Transparent" Click="OnSelectMainDisplayClick" />
+                                                        <Button x:Name="SelectSubScreenAreaButton" Width="54" Height="54"
+                                                                HorizontalAlignment="Center" VerticalAlignment="Top"
+                                                                Margin="0,301,0,0" Background="Transparent"
+                                                                BorderBrush="Transparent" Click="OnSelectSubDisplayClick" />
+                                                    </Grid>
                                                 </Grid>
                                             </suki:BusyArea>
                                         </suki:GlassCard>
