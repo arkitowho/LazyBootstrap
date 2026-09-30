@@ -329,20 +329,7 @@ namespace LazyBootstrap.UI
         }
 
         private void OnOpenGitHubRepositoryClick(object sender, Avalonia.Interactivity.RoutedEventArgs e)
-        {
-            try
-            {
-                ProcessExecutionHelper.StartShellProcess(
-                    ProjectRepositoryUrl,
-                    _paths.ApplicationDirectoryPath,
-                    false)?.Dispose();
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to open the project repository in the default browser.");
-                ShowErrorToast("无法打开 GitHub", "请检查系统默认浏览器设置后重试。");
-            }
-        }
+            => OpenWebsite(ProjectRepositoryUrl, "无法打开 GitHub");
 
         private sealed class EnvironmentScanViewState
         {

@@ -43,6 +43,10 @@ namespace LazyBootstrap.Services
 
         public bool Succeeded { get; }
 
+        public bool Cancelled { get; init; }
+
+        public string UserMessage { get; init; }
+
         public IReadOnlyDictionary<string, DisplayState> RestoreStates { get; }
 
         public IReadOnlyList<string> Messages { get; }
@@ -90,7 +94,7 @@ namespace LazyBootstrap.Services
                 if (cancellationToken.IsCancellationRequested)
                 {
                     messages.Add("已取消显示器配置，正在还原已应用的设置。");
-                    return new DisplaySettingsTransactionResult(false, RollbackAppliedRequests(appliedRequests, restoreStates, messages), messages);
+                    return new DisplaySettingsTransactionResult(false, RollbackAppliedRequests(appliedRequests, restoreStates, messages), messages) { Cancelled = true };
                 }
                 var applyResult = _displayConfigurationService.ApplyDisplaySettings(
                     request.DeviceName,
@@ -105,7 +109,7 @@ namespace LazyBootstrap.Services
                     if (cancellationToken.IsCancellationRequested)
                     {
                         messages.Add("已取消显示器配置，正在还原已应用的设置。");
-                        return new DisplaySettingsTransactionResult(false, RollbackAppliedRequests(appliedRequests, restoreStates, messages), messages);
+                        return new DisplaySettingsTransactionResult(false, RollbackAppliedRequests(appliedRequests, restoreStates, messages), messages) { Cancelled = true };
                     }
                     continue;
                 }

@@ -161,15 +161,7 @@ namespace LazyBootstrap.UI
                     await ShowEnvironmentScanErrorDialogAsync();
                 }
 
-                if (_pendingNativeTouchDeprecatedDialog)
-                {
-                    _pendingNativeTouchDeprecatedDialog = false;
-                    await ShowMessageDialogAsync(
-                        "“原生触控输入”选项已弃用",
-                        "新版本spice2x已默认启用原生触控，现有选项已自动关闭并移除",
-                        "我知道了");
-                }
-                else if (!string.IsNullOrWhiteSpace(_pendingNativeTouchMigrationError))
+                if (!string.IsNullOrWhiteSpace(_pendingNativeTouchMigrationError))
                 {
                     string error = _pendingNativeTouchMigrationError;
                     _pendingNativeTouchMigrationError = string.Empty;
@@ -206,23 +198,14 @@ namespace LazyBootstrap.UI
 
         private async Task ShowEnvironmentScanErrorDialogAsync()
         {
-            const string errorContent =
-                "(*´ - `*)∩ 啊哇哇。。。Near 检测到你的系统可能缺少必要的运行环境！\n\n" +
-                "(∩^-^)∩(∩^-^)∩ Noah 建议的操作步骤：\n" +
-                "- 在工具页点击「安装运行库」按钮安装必要运行环境\n" +
-                "- 确保已安装最新的显卡驱动程序\n" +
-                "- 如为 AMD/Intel 显卡请启用“显卡兼容层”功能\n\n" +
-                "如“系统媒体功能包”异常：\n" +
-                "- 检查“Windows 设置”中是否已启用“媒体功能包”\n\n" +
-                "请注意！由于硬件不同，检查结果可能会误报！\n" +
-                "如果所有游戏运行正常没有问题，请忽略以上提示。";
+            const string errorContent = "环境检查发现异常，可能影响游戏运行。可查看异常项；若游戏运行正常，可忽略。";
 
             bool openDiagPage = await ShowDialogAsync(
                 "环境检查提示",
                 errorContent,
                 "查看异常项",
                 "关闭",
-                NotificationType.Error,
+                NotificationType.Warning,
                 "Flat");
 
             if (openDiagPage)

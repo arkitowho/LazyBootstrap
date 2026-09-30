@@ -61,7 +61,7 @@ namespace LazyBootstrap.UI
             {
                 stopwatch.Stop();
                 _logger.LogError(ex, "Environment scan failed.");
-                ShowErrorToast("环境检查失败", ex.Message);
+                ShowErrorToast("环境检查失败", "无法完成环境检查，请重试。详情请查看日志。");
             }
         }
 

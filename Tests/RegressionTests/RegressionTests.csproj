@@ -11,6 +11,7 @@
     <PublishTrimmed>true</PublishTrimmed>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../../LazyBootstrap/Services/OperationResults.cs" Link="OperationResults.cs" />
     <Compile Include="../../LazyBootstrap/Application/StartupConfigError.cs" Link="StartupConfigError.cs" />
     <Compile Include="../../LazyBootstrap/Services/WindowsDisplayConfigurationService.cs" Link="WindowsDisplayConfigurationService.cs" />
     <Compile Include="../../LazyBootstrap/Services/DisplayRefreshCoordinator.cs" Link="DisplayRefreshCoordinator.cs" />

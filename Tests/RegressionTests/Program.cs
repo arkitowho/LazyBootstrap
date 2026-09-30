@@ -129,6 +129,7 @@ internal static class Program
         }, ref failed);
         failed += UpdateRegression.RunAll();
         failed += DisplayRegression.RunAll();
+        failed += OperationResultsRegression.RunAll();
         Console.WriteLine($"失败用例数：{failed}");
         return failed == 0 ? 0 : 1;
     }

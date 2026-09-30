@@ -1,5 +1,4 @@
 using System;
-using SystemEnvironment = System.Environment;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -53,7 +52,7 @@ namespace LazyBootstrap.UI
                 if (!discoveryResult.Succeeded)
                 {
                     _logger.LogWarning("Display discovery failed during warm-up: {Error}", discoveryResult.ErrorMessage);
-                    ShowWarningToast("读取显示器列表失败", discoveryResult.ErrorMessage);
+                    ShowWarningToast("读取显示器列表失败", "请检查显示器连接后重新检测。详情请查看日志。");
                 }
                 else
                 {
@@ -185,7 +184,7 @@ namespace LazyBootstrap.UI
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Display configuration refresh failed.");
-                if (!_displayRefreshCoordinator.IsDisposed) ShowErrorToast("显示器配置失败", ex.Message);
+                if (!_displayRefreshCoordinator.IsDisposed) ShowDisplayConfigurationError();
                 return DisplayRefreshOutcome.Failed;
             }
         }
@@ -198,13 +197,19 @@ namespace LazyBootstrap.UI
                 return;
             }
             var result = await ApplyDisplayTransactionAsync(BuildDisplayConfigurationRequest(state), preview: true);
-            if (!result.Succeeded && result.Messages.Count > 0 && !_displayRefreshCoordinator.IsDisposed)
-                ShowWarningToast("显示器预览", BuildDiagnosticsMessage(result.Messages));
+            if (!result.Succeeded && !_displayRefreshCoordinator.IsDisposed)
+            {
+                _logger.LogWarning("Display preview did not complete. Cancelled={Cancelled}, Messages={Messages}", result.Cancelled, string.Join("; ", result.Messages));
+                if (result.RestoreStates.Count > 0)
+                    ShowDisplayRestoreWarning(result.Messages);
+                else if (!result.Cancelled)
+                    ShowWarningToast("显示器预览", result.UserMessage ?? "无法应用预览，请检查显示器连接、分辨率和刷新率后重试。详情请查看日志。");
+            }
         }
 
         private async Task<DisplaySettingsTransactionResult> ApplyDisplayTransactionAsync(DisplayConfigurationRequest request, bool preview = false, CancellationToken cancellationToken = default)
         {
-            DisplaySettingsTransactionResult Failure(string message) => new(false, null, new[] { message });
+            DisplaySettingsTransactionResult Failure(string message) => new(false, null, new[] { message }) { UserMessage = message };
             if (!request.IsDisplayConfigurationEnabled)
                 return new DisplaySettingsTransactionResult(true, new Dictionary<string, DisplayState>(), Array.Empty<string>());
             if (preview && IsDisplayDetectionPaused) return Failure("游戏启动或运行期间无法预览显示器配置。");
@@ -224,7 +229,11 @@ namespace LazyBootstrap.UI
                 var discovery = await _displayRefreshCoordinator.DiscoverForTransactionAsync(_displayConfigurationService.GetDisplays, cancellationToken);
                 cancellationToken.ThrowIfCancellationRequested();
                 if (_displayRefreshCoordinator.IsDisposed) return Failure("窗口已关闭，已取消显示器配置。");
-                if (discovery.Status == DisplayDiscoveryStatus.Failed) return Failure($"无法确认显示器状态，请重新检测后重试：{discovery.ErrorMessage}");
+                if (discovery.Status == DisplayDiscoveryStatus.Failed)
+                {
+                    _logger.LogWarning("Display validation discovery failed: {Error}", discovery.ErrorMessage);
+                    return Failure("无法确认显示器状态，请检查显示器连接后重新检测。详情请查看日志。");
+                }
                 if (discovery.Status == DisplayDiscoveryStatus.Partial)
                     _logger.LogWarning("Display validation uses partial discovery; checking requested targets. Error={Error}", discovery.ErrorMessage);
                 DisplayChoiceOption ResolveTarget(DisplayChoiceOption selected) => selected == null ? null
@@ -266,12 +275,16 @@ namespace LazyBootstrap.UI
                         var restored = await Task.Run(() => _displaySettingsTransactionCoordinator.Restore(result.RestoreStates));
                         PreservePendingRestoreStates(restored.RestoreStates);
                         if (restored.Messages.Count > 0 && !_displayRefreshCoordinator.IsDisposed)
-                            ShowWarningToast("显示器还原", BuildDiagnosticsMessage(restored.Messages));
+                            ShowDisplayRestoreWarning(restored.Messages);
                     }
                 }
                 return result;
             }
-            catch (OperationCanceledException) { return Failure("已取消显示器配置。"); }
+            catch (OperationCanceledException)
+            {
+                _logger.LogInformation("Display transaction cancelled.");
+                return new DisplaySettingsTransactionResult(false, null, Array.Empty<string>()) { Cancelled = true };
+            }
             finally
             {
                 FinishDisplayTransaction();
@@ -291,7 +304,7 @@ namespace LazyBootstrap.UI
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to open touch panel settings.");
-                ShowErrorToast("打开面板失败", ex.Message);
+                ShowErrorToast("打开面板失败", "无法打开系统触控设置，请在 Windows 设置中检查触控设备。详情请查看日志。");
             }
 
             return Task.CompletedTask;
@@ -386,6 +399,8 @@ namespace LazyBootstrap.UI
             }
 
             var supportedModesResult = _displayConfigurationService.GetSupportedModes(selectedDisplay.Display.DeviceName);
+            if (!supportedModesResult.Succeeded)
+                _logger.LogWarning("Display mode query incomplete. Device={Device}, Error={Error}", selectedDisplay.Display.DeviceName, supportedModesResult.ErrorMessage);
             string tooltip = BuildTooltip(supportedModesResult);
 
             var resolutionItems = BuildResolutionItems(supportedModesResult.Modes, rotation, out string highestResolution);
@@ -487,9 +502,11 @@ namespace LazyBootstrap.UI
             }
 
             stateResult ??= new DisplayStateQueryResult(null, "显示器暂未连接，已保留原配置。");
+            if (!stateResult.Succeeded)
+                _logger.LogWarning("Current display state query failed. Device={Device}, Error={Error}", selectedDisplay.Display.DeviceName, stateResult.ErrorMessage);
             var outputInfo = stateResult.Succeeded
                 ? $"设备: {selectedDisplay.Display.FriendlyName} ({selectedDisplay.Display.DeviceName})\n当前: {stateResult.State.Width}x{stateResult.State.Height} @ {stateResult.State.RefreshRate}Hz, {FormatRotationDisplay(_displayConfigurationService.OrientationToAngle(stateResult.State.Orientation))}"
-                : $"设备: {selectedDisplay.Display.FriendlyName} ({selectedDisplay.Display.DeviceName})\n当前: 读取失败\n原因: {stateResult.ErrorMessage}";
+                : $"设备: {selectedDisplay.Display.FriendlyName} ({selectedDisplay.Display.DeviceName})\n当前: 无法读取，请检查显示器连接后重新检测。详情请查看日志。";
             var startupInfo = $"旋转: {FormatRotationDisplay(rotation)}\n分辨率: {FormatTextOrFallback(resolution)}\n刷新率: {FormatRefreshRateDisplay(refreshRate)}";
 
             if (isMainTarget)
@@ -761,34 +778,15 @@ namespace LazyBootstrap.UI
             }
 
             return result.Modes.Count > 0
-                ? $"{result.ErrorMessage}{SystemEnvironment.NewLine}已显示可读取到的显示模式，结果可能不完整。"
-                : result.ErrorMessage;
+                ? "显示模式读取不完整，已显示可读取的模式。请重新检测，详情请查看日志。"
+                : "无法读取显示模式，请检查显示器连接后重新检测。详情请查看日志。";
         }
 
-        private static string BuildDiagnosticsMessage(IReadOnlyList<string> messages)
+        private void ShowDisplayRestoreWarning(IReadOnlyList<string> messages)
         {
-            if (messages == null || messages.Count == 0)
-            {
-                return "未知错误。";
-            }
-
-            const int maxMessageCount = 3;
-            var visibleMessages = messages
-                .Where(message => !string.IsNullOrWhiteSpace(message))
-                .Take(maxMessageCount)
-                .ToList();
-
-            if (visibleMessages.Count == 0)
-            {
-                return "未知错误。";
-            }
-
-            if (messages.Count > maxMessageCount)
-            {
-                visibleMessages.Add($"其余 {messages.Count - maxMessageCount} 项请查看当前设置。");
-            }
-
-            return string.Join(SystemEnvironment.NewLine, visibleMessages);
+            _logger.LogWarning("Display restoration incomplete: {Messages}", string.Join("; ", messages));
+            if (_launchWorkflowLifetime.IsStopping) return;
+            ShowWarningToast("显示器还原未完成", "部分显示器设置尚未还原，请点击停止重试。详情请查看日志。");
         }
 
         private static string FormatRotationDisplay(int angle)

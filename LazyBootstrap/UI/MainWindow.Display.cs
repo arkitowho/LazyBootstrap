@@ -238,7 +238,7 @@ namespace LazyBootstrap.UI
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Display configuration selection failed.");
-                ShowErrorToast("显示器配置失败", ex.Message);
+                ShowDisplayConfigurationError();
                 ApplyDisplayStateToUi();
             }
         }
@@ -272,7 +272,7 @@ namespace LazyBootstrap.UI
                 _displayState.IsDisplayConfigurationEnabled = wasEnabled;
                 _displayState.IsDualDisplay = wasDualDisplay;
                 SynchronizeDisplayDetectionWithConfiguration();
-                ShowErrorToast("显示器配置失败", ex.Message);
+                ShowDisplayConfigurationError();
                 ApplyDisplayStateToUi();
             }
         }

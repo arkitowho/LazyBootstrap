@@ -85,7 +85,7 @@ internal static class DisplayWorkflowRegression
                 service.Release.Set();
                 await stopping;
                 await workflow;
-                Assert(!result.Succeeded && result.RestoreStates.Count == 0 && cleanupCalls == 1 && !lifetime.IsBusy, "停止清理状态错误");
+                Assert(!result.Succeeded && result.Cancelled && result.RestoreStates.Count == 0 && cleanupCalls == 1 && !lifetime.IsBusy, "停止清理状态错误或取消标记丢失");
             }, ref failed);
         }
 
@@ -99,7 +99,7 @@ internal static class DisplayWorkflowRegression
             cancellation.Cancel();
             service.Release.Set();
             var result = await apply;
-            Assert(result.RestoreStates.Count == 1 && result.Messages.Count > 0 && service.Width == 1280, "还原失败丢失快照或诊断");
+            Assert(result.Cancelled && result.RestoreStates.Count == 1 && result.Messages.Count > 0 && service.Width == 1280, "还原失败丢失快照、取消标记或诊断");
             var failedRestore = transaction.Restore(result.RestoreStates);
             Assert(!failedRestore.Succeeded && failedRestore.RestoreStates.Count == 1, "重试失败却清空快照");
             service.FailRestore = false;
