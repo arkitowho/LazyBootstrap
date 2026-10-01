@@ -8,7 +8,6 @@ using System.Threading.Tasks;
 using System.Xml.Linq;
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using LazyBootstrap;
@@ -47,7 +46,7 @@ internal static class Program
                     Console.WriteLine("PASS: spicecfg exit updates subdisplay and landscape toggles in both directions on the settings page.");
                     Console.WriteLine("PASS: display compatibility mode persists, switches XML refresh overrides, and preserves output bindings on failure.");
                 }
-                Console.WriteLine("PASS: display preview fades its top and bottom edges while preserving screen selection.");
+                Console.WriteLine("PASS: display preview layout and screen selection work without a transparency mask.");
                 exitCode = 0;
             }
             catch (Exception ex) { Console.Error.WriteLine(ex); }
@@ -91,7 +90,7 @@ internal static class Program
                 Set(display, "IsDisplayConfigurationEnabled", true);
                 Set(display, "IsDualDisplay", true);
                 Invoke(window, "InitializeDisplayLayoutControls");
-                await VerifyDisplayPreviewFadeAsync(window, Path.Combine(Environment.CurrentDirectory, "outputs", "display-preview.png"));
+                await VerifyDisplayPreviewAsync(window, Path.Combine(Environment.CurrentDirectory, "outputs", "display-preview.png"));
                 Invoke(window, "StopDisplayAnimation");
                 window.Hide();
                 return;
@@ -181,7 +180,7 @@ internal static class Program
         Invoke(window, "UpdateDisplayStartupInfo", state);
         Invoke(window, "ApplyDisplayStateToUi");
         Invoke(window, "PersistSelectionState", state);
-        await VerifyDisplayPreviewFadeAsync(window);
+        await VerifyDisplayPreviewAsync(window);
         AssertRefresh(xml, "120", "75");
         Assert(Option(xml, "mainmonitor") == "DISPLAY1" && Option(xml, "sdvxsubmonitor") == "DISPLAY2", "Output bindings changed.");
         Assert(Option(xml, "url") == "http://localhost:8083", "Unrelated XML option changed.");
@@ -260,7 +259,7 @@ internal static class Program
             "Disabling configuration lost refresh rate selections.");
     }
 
-    private static async Task VerifyDisplayPreviewFadeAsync(MainWindow window, string? screenshot = null)
+    private static async Task VerifyDisplayPreviewAsync(MainWindow window, string? screenshot = null)
     {
         var menu = window.FindControl<SukiSideMenu>("MainSideMenu")!;
         menu.SelectedItem = menu.Items.OfType<SukiSideMenuItem>().Single(item => item.Tag is ShellPage.Display);
@@ -274,16 +273,7 @@ internal static class Program
             bitmap.Render(window);
             bitmap.Save(screenshot);
         }
-        Assert(preview.OpacityMask is LinearGradientBrush,
-            "Display preview is missing its top and bottom transparency fade.");
-        var mask = (LinearGradientBrush)preview.OpacityMask!;
-        var stops = mask.GradientStops.OrderBy(stop => stop.Offset).ToArray();
-        Assert(mask.StartPoint == RelativePoint.TopLeft && mask.EndPoint == new RelativePoint(0, 1, RelativeUnit.Relative)
-            && stops.Length >= 4 && stops[0].Offset == 0 && stops[0].Color.A == 0
-            && stops[^1].Offset == 1 && stops[^1].Color.A == 0
-            && stops.Any(stop => stop.Offset > 0 && stop.Offset < 0.5 && stop.Color.A == 255)
-            && stops.Any(stop => stop.Offset > 0.5 && stop.Offset < 1 && stop.Color.A == 255),
-            "Display preview fade does not preserve the middle and soften both edges.");
+        Assert(preview.OpacityMask == null, "Display preview still has a transparency mask.");
         var originalHeight = window.Height;
         try
         {
@@ -292,7 +282,7 @@ internal static class Program
                 window.Height = height;
                 await Task.Delay(150);
                 Assert(preview.Bounds.Height > 0 && preview.Bounds.Height <= busyArea.Bounds.Height + 1 && preview.ClipToBounds,
-                    "Display preview fade extends beyond the visible viewport when resized.");
+                    "Display preview extends beyond the visible viewport when resized.");
             }
         }
         finally
@@ -307,7 +297,7 @@ internal static class Program
             button.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
             Assert(window.FindControl<StackPanel>("Panel" + target + "ScreenConfig")!.IsVisible
                 && window.FindControl<Avalonia.Controls.Shapes.Ellipse>("Dot" + target + "SelectedRing")!.IsVisible,
-                "Fade mask prevented preview screen selection.");
+                "Preview screen selection did not update the configuration panel.");
         }
         var state = typeof(MainWindow).GetField("_displayState", PrivateInstance)!.GetValue(window)!;
         Set(state, "IsDualDisplay", false);
@@ -317,8 +307,8 @@ internal static class Program
         Set(state, "IsDualDisplay", true);
         Set(state, "IsDisplayConfigurationEnabled", false);
         Invoke(window, "ApplyDisplayStateToUi");
-        Assert(busyArea.IsBusy && busyArea.OpacityMask == null && ReferenceEquals(preview.OpacityMask, mask),
-            "Preview fade affects the disabled-state prompt or disappears when configuration is disabled.");
+        Assert(busyArea.IsBusy && busyArea.OpacityMask == null && preview.OpacityMask == null,
+            "Disabled display configuration has an unexpected transparency mask or missing prompt.");
         Set(state, "IsDisplayConfigurationEnabled", true);
         Invoke(window, "ApplyDisplayStateToUi");
     }

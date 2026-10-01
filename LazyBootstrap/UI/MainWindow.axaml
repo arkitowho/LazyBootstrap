@@ -714,18 +714,10 @@
                                                            BusyText="显示器配置未启用">
                                                 <Grid HorizontalAlignment="Center" VerticalAlignment="Center"
                                                       Width="300" MaxHeight="540" ClipToBounds="True">
-                                                    <Grid.OpacityMask>
-                                                        <LinearGradientBrush StartPoint="0%,0%" EndPoint="0%,100%">
-                                                            <GradientStop Offset="0" Color="Transparent" />
-                                                            <GradientStop Offset="0.12" Color="Black" />
-                                                            <GradientStop Offset="0.88" Color="Black" />
-                                                            <GradientStop Offset="1" Color="Transparent" />
-                                                        </LinearGradientBrush>
-                                                    </Grid.OpacityMask>
                                                     <Grid HorizontalAlignment="Center" VerticalAlignment="Center"
                                                           Width="300" Height="540">
                                                         <Image Source="avares://LazyBootstrap/Assets/Images/cabinet.png"
-                                                               Stretch="Uniform" Width="240" />
+                                                               Stretch="Uniform" Width="200" />
                                                         <Canvas Width="300" Height="540" IsHitTestVisible="False">
                                                             <Ellipse x:Name="DotMainGlow" Canvas.Left="124"
                                                                      Canvas.Top="157"
