@@ -119,14 +119,21 @@ namespace LazyBootstrap.UI
             if (state.IsDisplayConfigurationEnabled)
             {
                 if (_displayInitialization.IsPending) return Task.CompletedTask;
-                PersistSelectionState(state);
-                return Task.CompletedTask;
+                if (AreDisplaySelectionsReady(state))
+                {
+                    PersistSelectionState(state);
+                    return Task.CompletedTask;
+                }
+                // Explicit general-setting changes must still persist without replacing invalid mode selections.
             }
 
-            _appConfig.WriteString(AppConfigDefaults.DisplaySectionName, "displayconfigure", state.IsDisplayConfigurationEnabled.ToString().ToLowerInvariant());
-            _appConfig.WriteString(AppConfigDefaults.DisplaySectionName, "mode", state.IsDualDisplay ? "dual" : "single");
-            _appConfig.WriteString(AppConfigDefaults.DisplaySectionName, "exitrestore", state.ExitRestore.ToString().ToLowerInvariant());
-            _appConfig.WriteString(AppConfigDefaults.DisplaySectionName, "compatibilitymode", state.CompatibilityMode.ToString().ToLowerInvariant());
+            _appConfig.WriteSection(AppConfigDefaults.DisplaySectionName, new Dictionary<string, string>
+            {
+                ["displayconfigure"] = state.IsDisplayConfigurationEnabled.ToString().ToLowerInvariant(),
+                ["mode"] = state.IsDualDisplay ? "dual" : "single",
+                ["exitrestore"] = state.ExitRestore.ToString().ToLowerInvariant(),
+                ["compatibilitymode"] = state.CompatibilityMode.ToString().ToLowerInvariant()
+            });
             if (!SyncSpiceMonitorOverrides(state)) ShowDisplayConfigurationError();
             _logger.LogInformation("Display general settings persisted. Enabled={Enabled}, DualDisplay={DualDisplay}, ExitRestore={ExitRestore}", state.IsDisplayConfigurationEnabled, state.IsDualDisplay, state.ExitRestore);
             return Task.CompletedTask;
@@ -145,8 +152,7 @@ namespace LazyBootstrap.UI
             string subResolution = state.SelectedSubResolution;
             string mainRefresh = state.SelectedMainRefreshRate;
             string subRefresh = state.SelectedSubRefreshRate;
-            // Save user intent before awaiting native calls; discovery refresh never writes configuration.
-            if (persist && !_displayInitialization.IsPending) PersistSelectionState(state);
+            // Persist only after a complete mode query confirms the active selections.
             try
             {
                 var results = await _displayRefreshCoordinator.RunAsync(() =>
@@ -169,6 +175,7 @@ namespace LazyBootstrap.UI
                     state.SelectedMainResolution = results.mainOptions.SelectedResolution;
                     state.SelectedMainRefreshRate = results.mainOptions.SelectedRefreshRate;
                     state.MainDiagnosticsTooltip = results.mainOptions.Tooltip;
+                    state.MainModeQuerySucceeded = results.mainOptions.QuerySucceeded;
                 }
                 if (refreshSubOptions)
                 {
@@ -177,13 +184,15 @@ namespace LazyBootstrap.UI
                     state.SelectedSubResolution = results.subOptions.SelectedResolution;
                     state.SelectedSubRefreshRate = results.subOptions.SelectedRefreshRate;
                     state.SubDiagnosticsTooltip = results.subOptions.Tooltip;
+                    state.SubModeQuerySucceeded = results.subOptions.QuerySucceeded;
                 }
                 UpdateDisplayInfo(state, true, results.mainState);
                 UpdateDisplayInfo(state, false, results.subState);
-                if (persist && !_displayInitialization.IsPending) PersistSelectionState(state);
-                return (!refreshMainOptions || results.mainOptions.IsReady) &&
-                    (!state.IsDualDisplay || !refreshSubOptions || results.subOptions.IsReady)
-                    ? DisplayRefreshOutcome.Completed : DisplayRefreshOutcome.Failed;
+                bool refreshReplaced = mainRefresh != state.SelectedMainRefreshRate ||
+                    (state.IsDualDisplay && subRefresh != state.SelectedSubRefreshRate);
+                if ((persist || refreshReplaced) && !_displayInitialization.IsPending && _displayCatalog.StatusMessage.Length == 0)
+                    PersistSelectionState(state);
+                return AreDisplaySelectionsReady(state) ? DisplayRefreshOutcome.Completed : DisplayRefreshOutcome.Failed;
             }
             catch (OperationCanceledException) { return DisplayRefreshOutcome.Canceled; }
             catch (Exception ex)
@@ -227,6 +236,7 @@ namespace LazyBootstrap.UI
             _displayTransactionActive = true;
             _displayRevision++;
             UpdateDisplayLayoutControlsEnabled();
+            bool displaySettingsAttempted = false;
             try
             {
                 using var lease = await _displayRefreshCoordinator.EnterTransactionAsync(cancellationToken);
@@ -250,8 +260,12 @@ namespace LazyBootstrap.UI
                 if (request.IsDualDisplay && sub?.Display?.IsAvailable != true)
                     return Failure($"副显示器（{request.SelectedSubDisplay?.Display?.FriendlyName ?? "未选择"}）暂未连接，已停止应用设置。");
                 request = request with { SelectedMainDisplay = main, SelectedSubDisplay = sub };
+                string refreshError = await Task.Run(() => ValidateDisplayRefreshRates(request), cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!string.IsNullOrEmpty(refreshError)) return Failure(refreshError);
                 if (!preview && !SyncSpiceMonitorOverrides(request))
                     return Failure("更新 Spice2x 显示器配置失败，已停止启动。");
+                displaySettingsAttempted = true;
                 var result = await Task.Run(() =>
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -295,7 +309,7 @@ namespace LazyBootstrap.UI
                 FinishDisplayTransaction();
                 _displayTransactionCancellation = null;
                 completion.TrySetResult();
-                if (preview) await RequestDisplayListRefreshAsync("PreviewCompleted", waitForCurrent: true);
+                if (preview && displaySettingsAttempted) await RequestDisplayListRefreshAsync("PreviewCompleted", waitForCurrent: true);
             }
         }
 
@@ -399,7 +413,7 @@ namespace LazyBootstrap.UI
             {
                 return new DisplayModeOptions(
                     string.IsNullOrWhiteSpace(selectedResolution) ? Array.Empty<string>() : new[] { selectedResolution },
-                    string.IsNullOrWhiteSpace(selectedRefreshRate) ? Array.Empty<string>() : new[] { selectedRefreshRate },
+                    Array.Empty<string>(),
                     selectedResolution, selectedRefreshRate, "显示器暂未连接，已保留原配置。");
             }
 
@@ -421,25 +435,51 @@ namespace LazyBootstrap.UI
 
             var refreshItems = supportedModesResult.Modes
                 .Where(mode => string.Equals(NormalizeResolutionByRotation(mode.Width, mode.Height, rotation), selectedResolution, StringComparison.OrdinalIgnoreCase))
+                .Where(mode => mode.RefreshRate >= WindowsDisplayConfigurationService.MinimumSelectableRefreshRate)
                 .Select(mode => mode.RefreshRate)
                 .Distinct()
                 .OrderBy(value => value)
-                .Select(value => value.ToString())
+                .Select(value => value.ToString(CultureInfo.InvariantCulture))
                 .ToList();
 
-            if (!string.IsNullOrWhiteSpace(selectedRefreshRate) && (preserveSelection || !supportedModesResult.Succeeded))
-            {
-                if (!refreshItems.Contains(selectedRefreshRate, StringComparer.OrdinalIgnoreCase)) refreshItems.Add(selectedRefreshRate);
-            }
-            else if (!refreshItems.Contains(selectedRefreshRate ?? string.Empty, StringComparer.OrdinalIgnoreCase))
+            if (supportedModesResult.Succeeded && !refreshItems.Contains(selectedRefreshRate ?? string.Empty, StringComparer.OrdinalIgnoreCase))
             {
                 selectedRefreshRate = refreshItems.FirstOrDefault() ?? string.Empty;
             }
+            if (supportedModesResult.Succeeded && refreshItems.Count == 0)
+                tooltip = "所选分辨率没有可用的 60 Hz 及以上刷新率，无法预览或启动，请选择其他分辨率或重新检测。";
 
-            bool selectionSupported = supportedModesResult.Succeeded && supportedModesResult.Modes.Any(mode =>
-                string.Equals(NormalizeResolutionByRotation(mode.Width, mode.Height, rotation), selectedResolution, StringComparison.OrdinalIgnoreCase) &&
-                mode.RefreshRate.ToString() == selectedRefreshRate);
-            return new DisplayModeOptions(resolutionItems, refreshItems, selectedResolution, selectedRefreshRate, tooltip, selectionSupported);
+            return new DisplayModeOptions(resolutionItems, refreshItems, selectedResolution, selectedRefreshRate, tooltip, supportedModesResult.Succeeded);
+        }
+
+        private string ValidateDisplayRefreshRates(DisplayConfigurationRequest request)
+        {
+            string Validate(DisplayChoiceOption display, int rotation, string resolution, string refreshRate, string label)
+            {
+                if (!int.TryParse(refreshRate, NumberStyles.Integer, CultureInfo.InvariantCulture, out int rate) ||
+                    rate < WindowsDisplayConfigurationService.MinimumSelectableRefreshRate)
+                    return $"{label}没有有效的 60 Hz 及以上刷新率，请选择其他分辨率或重新检测。";
+                var result = _displayConfigurationService.GetSupportedModes(display.Display.DeviceName);
+                if (!result.Succeeded)
+                    return $"无法完整读取{label}的显示模式，请重新检测后重试。";
+                return result.Modes.Any(mode => mode.RefreshRate == rate &&
+                    NormalizeResolutionByRotation(mode.Width, mode.Height, rotation) == resolution)
+                    ? string.Empty : $"{label}不支持所选分辨率和刷新率，请重新检测后选择有效值。";
+            }
+            string error = Validate(request.SelectedMainDisplay, request.SelectedMainRotation?.Angle ?? 0,
+                request.SelectedMainResolution, request.SelectedMainRefreshRate, "主显示器");
+            if (error.Length > 0 || !request.IsDualDisplay) return error;
+            return Validate(request.SelectedSubDisplay, request.SelectedSubRotation?.Angle ?? 0,
+                request.SelectedSubResolution, request.SelectedSubRefreshRate, "副显示器");
+        }
+
+        private static bool AreDisplaySelectionsReady(DisplayConfigurationState state)
+        {
+            bool mainReady = state.MainModeQuerySucceeded && state.SelectedMainDisplay?.Display?.IsAvailable == true &&
+                state.MainRefreshRates.Contains(state.SelectedMainRefreshRate) && state.MainResolutions.Contains(state.SelectedMainResolution);
+            bool subReady = !state.IsDualDisplay || (state.SubModeQuerySucceeded && state.SelectedSubDisplay?.Display?.IsAvailable == true &&
+                state.SubRefreshRates.Contains(state.SelectedSubRefreshRate) && state.SubResolutions.Contains(state.SelectedSubResolution));
+            return mainReady && subReady;
         }
 
         private static IReadOnlyList<string> BuildResolutionItems(IReadOnlyList<DisplayMode> modes, int rotation, out string highestResolution)
@@ -451,7 +491,7 @@ namespace LazyBootstrap.UI
             }
 
             var highestMode = modes
-                .OrderByDescending(mode => mode.Width * mode.Height)
+                .OrderByDescending(mode => (long)mode.Width * mode.Height)
                 .ThenByDescending(mode => mode.Width)
                 .ThenByDescending(mode => mode.Height)
                 .First();
@@ -542,6 +582,7 @@ namespace LazyBootstrap.UI
 
         private void PersistSelectionState(DisplayConfigurationState state)
         {
+            if (state.IsDisplayConfigurationEnabled && !AreDisplaySelectionsReady(state)) return;
             _logger.LogDebug("Persisting display selection state.");
             _appConfig.WriteSection(AppConfigDefaults.DisplaySectionName, new Dictionary<string, string>
             {
@@ -679,7 +720,8 @@ namespace LazyBootstrap.UI
             value = string.Empty;
             // Selections can be empty while the display's supported modes are being refreshed.
             if (string.IsNullOrWhiteSpace(selectedRate)) return true;
-            if (!int.TryParse(selectedRate, NumberStyles.Integer, CultureInfo.InvariantCulture, out int refreshRate) || refreshRate <= 0)
+            if (!int.TryParse(selectedRate, NumberStyles.Integer, CultureInfo.InvariantCulture, out int refreshRate) ||
+                refreshRate < WindowsDisplayConfigurationService.MinimumSelectableRefreshRate)
                 return false;
             value = refreshRate.ToString(CultureInfo.InvariantCulture);
             return true;
@@ -745,16 +787,13 @@ namespace LazyBootstrap.UI
                 return false;
             }
 
-            int? refreshValue = null;
-            if (compatibilityMode)
+            if (!int.TryParse(refreshRate, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedRefresh) ||
+                parsedRefresh < WindowsDisplayConfigurationService.MinimumSelectableRefreshRate)
             {
-                if (!int.TryParse(refreshRate, out int parsedRefresh) || parsedRefresh <= 0)
-                {
-                    messages.Add($"{targetName}刷新率无效: {refreshRate}");
-                    return false;
-                }
-                refreshValue = parsedRefresh;
+                messages.Add($"{targetName}刷新率无效，请选择 60 Hz 及以上刷新率: {refreshRate}");
+                return false;
             }
+            int? refreshValue = compatibilityMode ? parsedRefresh : null;
 
             requests.Add(new DisplaySettingsRequest(targetName, selectedDisplay.Display.DeviceName, rotation, width, height, refreshValue));
             return true;
@@ -862,7 +901,7 @@ namespace LazyBootstrap.UI
             string SelectedResolution,
             string SelectedRefreshRate,
             string Tooltip,
-            bool IsReady = false);
+            bool QuerySucceeded = false);
 
 
         private int ReadInt(string section, string key, int defaultValue)

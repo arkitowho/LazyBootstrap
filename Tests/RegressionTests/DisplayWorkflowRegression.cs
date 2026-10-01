@@ -47,6 +47,15 @@ internal static class DisplayWorkflowRegression
             Assert(!result.Succeeded && service.Calls.Count == 1 && service.Width == 1920, "校验失败仍应用了设置");
             await Task.CompletedTask;
         }, ref failed);
+        Check("退出还原保留低于候选下限的原始刷新率", async () =>
+        {
+            var service = new RecordingDisplayService { RefreshRate = 59 };
+            var transaction = new DisplaySettingsTransactionCoordinator(service);
+            var applied = transaction.Apply(Requests(120));
+            Assert(applied.Succeeded && transaction.Restore(applied.RestoreStates).Succeeded && service.RefreshRate == 59,
+                "原始 59 Hz 状态未完整还原");
+            await Task.CompletedTask;
+        }, ref failed);
         Check("部分检测允许使用正常目标，但不以其他输出替代缺失目标", async () =>
         {
             var main = new DisplayInfo { PersistentId = "main", DeviceName = "DISPLAY1" };

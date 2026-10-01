@@ -39,6 +39,7 @@
     </ItemGroup>
 
     <ItemGroup>
+        <InternalsVisibleTo Include="SettingsRegressionTests"/>
         <PackageReference Include="Avalonia" Version="11.3.17"/>
         <PackageReference Include="Avalonia.Desktop" Version="11.3.17"/>
         <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.7"/>

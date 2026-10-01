@@ -16,7 +16,18 @@ internal static class DisplayRegression
             Assert(desktop.Succeeded && result.Succeeded, "本机枚举失败：" + desktop.ErrorMessage + result.ErrorMessage);
             Assert(desktop.Displays.All(expected => result.Displays.Any(actual =>
                 string.Equals(expected.DeviceName, actual.DeviceName, StringComparison.OrdinalIgnoreCase))), "启动器遗漏活动桌面输出");
-            if (index == 0) Console.WriteLine($"本机活动输出：{result.Displays.Count}；适配器来源：{result.AdapterCount}；桌面来源：{result.DesktopCount}");
+            if (index == 0)
+            {
+                Console.WriteLine($"本机活动输出：{result.Displays.Count}；适配器来源：{result.AdapterCount}；桌面来源：{result.DesktopCount}");
+                foreach (var display in result.Displays)
+                {
+                    var modes = service.GetSupportedModes(display.DeviceName);
+                    Assert(modes.Succeeded, "本机显示模式读取失败：" + modes.ErrorMessage);
+                    var rates = modes.Modes.Where(mode => mode.RefreshRate >= WindowsDisplayConfigurationService.MinimumSelectableRefreshRate)
+                        .Select(mode => mode.RefreshRate).Distinct().OrderBy(rate => rate);
+                    Console.WriteLine($"{display.DeviceName}：{display.FriendlyName}；有效刷新率：{string.Join(", ", rates)} Hz；模式数：{modes.Modes.Count}");
+                }
+            }
         }
         Console.WriteLine("通过: 真实 Windows 枚举连续比对 10 次");
         return 0;
@@ -228,7 +239,7 @@ internal static class DisplayRegression
             try { await query; throw new Exception("关闭后仍返回可应用的结果"); }
             catch (OperationCanceledException) { }
         }), ref failed);
-        return failed + DisplayWorkflowRegression.RunAll();
+        return failed + DisplayModeRegression.RunAll() + DisplayWorkflowRegression.RunAll();
     }
 
     private static void RunAsync(Func<Task> action) => action().WaitAsync(TimeSpan.FromSeconds(15)).GetAwaiter().GetResult();

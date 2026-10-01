@@ -466,7 +466,7 @@ namespace LazyBootstrap.UI
                 }
             }
 
-            comboBox.SelectedIndex = value == null ? -1 : 0;
+            comboBox.SelectedIndex = -1;
         }
 
         private void UpdateDisplayLayoutControlsEnabled()
@@ -492,7 +492,7 @@ namespace LazyBootstrap.UI
             if (RotationComboBox != null) RotationComboBox.IsEnabled = enabled;
             if (MainResolutionComboBox != null) MainResolutionComboBox.IsEnabled = enabled;
             if (MainRefreshRateComboBox != null) MainRefreshRateComboBox.IsEnabled = enabled;
-            if (PreviewDisplaySettingsButton != null) PreviewDisplaySettingsButton.IsEnabled = enabled;
+            if (PreviewDisplaySettingsButton != null) PreviewDisplaySettingsButton.IsEnabled = enabled && AreDisplaySelectionsReady(_displayState);
 
             if (SelectMainScreenAreaButton != null)
             {
@@ -642,6 +642,8 @@ namespace LazyBootstrap.UI
             public List<string> SubResolutions { get; } = new List<string>();
             public List<string> MainRefreshRates { get; } = new List<string>();
             public List<string> SubRefreshRates { get; } = new List<string>();
+            public bool MainModeQuerySucceeded { get; set; }
+            public bool SubModeQuerySucceeded { get; set; }
             public bool IsDisplayConfigurationEnabled { get; set; }
             public bool IsDualDisplay { get; set; }
             public bool ExitRestore { get; set; } = true;

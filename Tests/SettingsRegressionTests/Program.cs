@@ -12,6 +12,8 @@ using Avalonia.Media.Imaging;
 using Avalonia.Threading;
 using LazyBootstrap;
 using LazyBootstrap.UI;
+using LazyBootstrap.Services;
+using LazyBootstrap.Serialization;
 using SukiUI.Controls;
 
 internal static class Program
@@ -132,6 +134,7 @@ internal static class Program
                 Assert(menu.SelectedItem is SukiSideMenuItem { Tag: ShellPage.Settings }, "Reloading settings changed the selected page.");
             }
             await RunDisplayConfigurationAsync(window, paths, xml);
+            await RunDisplayRefreshRegressionAsync(window, xml, configPath);
             Invoke(window, "StopDisplayAnimation");
             window.Hide();
         }
@@ -174,6 +177,7 @@ internal static class Program
             Set(state, "Selected" + target + "Display", target == "Main" ? main : sub);
             Set(state, "Selected" + target + "Resolution", "1920x1080");
             Set(state, "Selected" + target + "RefreshRate", target == "Main" ? "120" : "75");
+            Set(state, target + "ModeQuerySucceeded", true);
         }
         Set(state, "IsDisplayConfigurationEnabled", true);
         Set(state, "IsDualDisplay", true);
@@ -257,6 +261,154 @@ internal static class Program
         Assert(Option(xml, "mainmonitor") == "" && Option(xml, "sdvxsubmonitor") == "", "Disabled display configuration retained overrides.");
         Assert((string)Get(state, "SelectedMainRefreshRate") == "120" && (string)Get(state, "SelectedSubRefreshRate") == "75",
             "Disabling configuration lost refresh rate selections.");
+    }
+
+    private static async Task RunDisplayRefreshRegressionAsync(MainWindow window, string xml, string configPath)
+    {
+        var state = typeof(MainWindow).GetField("_displayState", PrivateInstance)!.GetValue(window)!;
+        var store = (AppConfigStore)typeof(MainWindow).GetField("_appConfig", PrivateInstance)!.GetValue(window)!;
+        var originalService = typeof(MainWindow).GetField("_displayConfigurationService", PrivateInstance)!.GetValue(window)!;
+        var originalTransactions = typeof(MainWindow).GetField("_displaySettingsTransactionCoordinator", PrivateInstance)!.GetValue(window)!;
+        var service = new DisplayModeFixture();
+        service.Compatible["DISPLAY1"] = new[] { (1920, 1080, 0), (1920, 1080, 1), (1920, 1080, 50),
+            (1920, 1080, 59), (1920, 1080, 60), (1920, 1080, 75), (1920, 1080, 60), (1280, 720, 92) };
+        service.Raw["DISPLAY1"] = new[] { (1920, 1080, 60), (1920, 1080, 73), (1920, 1080, 489), (1920, 1080, 900) };
+        service.RejectedRates.Add(900);
+        service.Compatible["DISPLAY2"] = new[] { (1920, 1080, 60) };
+        service.Raw["DISPLAY2"] = new[] { (1920, 1080, 87) };
+        object Choice(string device) => Activator.CreateInstance(typeof(MainWindow).GetNestedType("DisplayChoiceOption", BindingFlags.NonPublic)!,
+            new DisplayInfo { DeviceName = device, PersistentId = device, FriendlyName = device }, device)!;
+        object Request() => Invoke(window, "BuildDisplayConfigurationRequest")!;
+        Task Refresh(bool persist = false) => InvokeAsync(window, "HandleConfigurationChangedAsync", state, true, true, persist);
+        string[] Rates(string target) => ((IList)Get(state, target + "RefreshRates")).Cast<string>().ToArray();
+        async Task AssertRejected()
+        {
+            foreach (bool preview in new[] { false, true })
+            {
+                var beforeXml = File.ReadAllText(xml);
+                var result = await (Task<DisplaySettingsTransactionResult>)Invoke(window, "ApplyDisplayTransactionAsync", Request(), preview, CancellationToken.None)!;
+                Assert(!result.Succeeded && !string.IsNullOrEmpty(result.UserMessage), "Invalid refresh selection was applied.");
+                Assert(File.ReadAllText(xml) == beforeXml, "Validation failure changed XML.");
+            }
+        }
+        Invoke(window, "InitializeDisplayServices", service, new DisplaySettingsTransactionCoordinator(service));
+        try
+        {
+            Set(state, "IsDisplayConfigurationEnabled", true);
+            Set(state, "IsDualDisplay", true);
+            Set(state, "CompatibilityMode", false);
+            Invoke(window, "SynchronizeDisplayDetectionWithConfiguration");
+            foreach (string target in new[] { "Main", "Sub" })
+            {
+                Set(state, "Selected" + target + "Display", Choice(target == "Main" ? "DISPLAY1" : "DISPLAY2"));
+                Set(state, "Selected" + target + "Rotation", ((IList)Get(state, "Rotations"))[0]);
+                Set(state, "Selected" + target + "Resolution", "1920x1080");
+                Set(state, "Selected" + target + "RefreshRate", target == "Main" ? "59" : "400");
+            }
+            await Refresh();
+            Invoke(window, "ApplyDisplayStateToUi");
+            Assert(Rates("Main").SequenceEqual(new[] { "60", "73", "75", "489" }), "Main refresh candidates are not filtered, sorted or complete: " + string.Join(",", Rates("Main")));
+            Assert(Rates("Sub").SequenceEqual(new[] { "60", "87" }), "Sub display inherited main refresh rates.");
+            Assert((string)Get(state, "SelectedMainRefreshRate") == "60" && (string)Get(state, "SelectedSubRefreshRate") == "60",
+                "Old unsupported rates did not select the lowest supported integer.");
+            Assert(store.ReadString("Display", "mainrefresh") == "60", "Automatic replacement was not saved.");
+            AssertRefresh(xml, "60", "60");
+            Assert((string)Invoke(window, "ValidateDisplayRefreshRates", Request())! == "", "Supported refresh selection failed preflight.");
+            Assert(window.FindControl<Button>("PreviewDisplaySettingsButton")!.IsEnabled, "Valid selections disabled preview.");
+
+            foreach (int rotation in new[] { 0, 90, 180, 270 })
+            {
+                var resolution = rotation is 90 or 270 ? "1080x1920" : "1920x1080";
+                var options = Invoke(window, "RefreshDisplayOptions", Get(state, "SelectedMainDisplay"), rotation, resolution, "59", true)!;
+                Assert(((System.Collections.Generic.IEnumerable<string>)Get(options, "RefreshRates")).SequenceEqual(Rates("Main")),
+                    "Rotation changed the refresh candidates.");
+            }
+            var lower = Invoke(window, "RefreshDisplayOptions", Get(state, "SelectedMainDisplay"), 0, "1280x720", "60", false)!;
+            Assert(((System.Collections.Generic.IEnumerable<string>)Get(lower, "RefreshRates")).SequenceEqual(new[] { "92" }),
+                "Refresh rates were mixed between resolutions.");
+
+            foreach (bool compatibility in new[] { true, false })
+            {
+                Set(state, "CompatibilityMode", compatibility);
+                await InvokeAsync(window, "PersistGeneralSettingsAsync", state);
+                AssertRefresh(xml, compatibility ? "" : "60", compatibility ? "" : "60");
+            }
+            service.Raw["DISPLAY1"] = service.Raw["DISPLAY1"].Append((1920, 1080, 101)).ToArray();
+            await Refresh();
+            Assert(Rates("Main").Contains("101"), "A newly registered custom refresh rate was not detected.");
+            Set(state, "SelectedMainRefreshRate", "101");
+            await InvokeAsync(window, "HandleConfigurationChangedAsync", state, false, false, true);
+            AssertRefresh(xml, "101", "60");
+
+            foreach (string invalid in new[] { "59", "999" })
+            {
+                Set(state, "SelectedMainRefreshRate", invalid);
+                await AssertRejected();
+            }
+            var savedConfig = File.ReadAllText(configPath);
+            var savedXml = File.ReadAllText(xml);
+            Set(state, "SelectedMainRefreshRate", "59");
+            service.FailDevice = "DISPLAY1";
+            await Refresh(persist: true);
+            Invoke(window, "ApplyDisplayStateToUi");
+            Assert(!Rates("Main").Contains("59") && (string)Get(state, "SelectedMainRefreshRate") == "59",
+                "Partial query injected an old rate or overwrote saved intent.");
+            Assert(window.FindControl<ComboBox>("MainRefreshRateComboBox")!.SelectedIndex == -1,
+                "UI displayed a different selection after a partial query.");
+            Assert(File.ReadAllText(configPath) == savedConfig && File.ReadAllText(xml) == savedXml,
+                "Partial query rewrote persisted configuration.");
+            Assert(!window.FindControl<Button>("PreviewDisplaySettingsButton")!.IsEnabled, "Partial query enabled preview.");
+            Set(state, "SelectedMainRefreshRate", "75");
+            await AssertRejected();
+
+            service.FailDevice = "";
+            service.CurrentRate = 59;
+            service.Compatible["DISPLAY1"] = new[] { (1920, 1080, 59) };
+            service.Raw["DISPLAY1"] = new[] { (1920, 1080, 59) };
+            await Refresh(persist: true);
+            Invoke(window, "ApplyDisplayStateToUi");
+            Assert(Rates("Main").Length == 0 && (string)Get(state, "SelectedMainRefreshRate") == "",
+                "No eligible modes retained an invalid refresh selection.");
+            Assert(((IList)Get(state, "MainResolutions")).Contains("1920x1080"), "Refresh filter removed the resolution.");
+            Assert(((string)Get(state, "MainDiagnosticsTooltip")).Contains("60 Hz"), "Missing eligible modes had no Chinese guidance.");
+            Assert(File.ReadAllText(configPath) == savedConfig && File.ReadAllText(xml) == savedXml,
+                "Empty refresh list overwrote saved configuration.");
+            foreach (bool compatibility in new[] { false, true })
+            {
+                Set(state, "CompatibilityMode", compatibility);
+                await AssertRejected();
+            }
+            await InvokeAsync(window, "PersistGeneralSettingsAsync", state);
+            AssertRefresh(xml, "", "");
+            Assert(store.ReadBool("Display", "compatibilitymode", false) && store.ReadString("Display", "mainrefresh") == "101",
+                "Compatibility toggle did not persist or replaced an invalid mode selection.");
+            Set(state, "CompatibilityMode", false);
+            await InvokeAsync(window, "PersistGeneralSettingsAsync", state);
+
+            service.CurrentRate = 60;
+            service.Compatible["DISPLAY1"] = new[] { (1920, 1080, 60), (1920, 1080, 75) };
+            service.Raw["DISPLAY1"] = new[] { (1920, 1080, 73) };
+            store.WriteString("Display", "mainrefresh", "59");
+            store.WriteString("Display", "subrefresh", "87");
+            await InvokeAsync(window, "WarmDisplayStateAsync", state);
+            Assert(store.ReadString("Display", "mainrefresh") == "60", "Reload did not migrate a saved 59 Hz selection.");
+            AssertRefresh(xml, "60", "87");
+
+            savedConfig = File.ReadAllText(configPath);
+            savedXml = File.ReadAllText(xml);
+            Set(state, "SelectedMainDisplay", Choice(""));
+            Set(state, "SelectedMainRefreshRate", "59");
+            await Refresh(persist: true);
+            Assert(Rates("Main").Length == 0 && File.ReadAllText(configPath) == savedConfig && File.ReadAllText(xml) == savedXml,
+                "Disconnected output injected old refresh rates or changed persisted configuration.");
+            Assert(service.Tests.All(call => call.Flags == 2), "Detection applied a system display setting.");
+            Console.WriteLine("PASS: integer refresh filtering, custom modes, automatic migration, preflight rejection and failure persistence.");
+        }
+        finally
+        {
+            Set(state, "IsDisplayConfigurationEnabled", false);
+            Invoke(window, "InitializeDisplayServices", originalService, originalTransactions);
+        }
     }
 
     private static async Task VerifyDisplayPreviewAsync(MainWindow window, string? screenshot = null)

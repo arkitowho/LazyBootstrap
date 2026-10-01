@@ -4,7 +4,7 @@ namespace LazyBootstrap.Services
 {
     internal enum DisplayRefreshOutcome { Completed, Failed, Canceled, Deferred }
 
-    // UI-thread-owned intent: ordinary refreshes cannot save configuration unless the user enabled it.
+    // UI-thread-owned intent: save a newly enabled configuration after a complete, valid detection.
     internal sealed class DisplayInitialization
     {
         public long Generation { get; private set; }

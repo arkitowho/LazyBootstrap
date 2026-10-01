@@ -175,7 +175,8 @@ namespace LazyBootstrap.UI
                 !_displayState.IsDisplayConfigurationEnabled || generation != _displayInitialization.Generation || _isWindowCloseAnimationRunning)
                 return DisplayRefreshOutcome.Canceled;
             ApplyDisplayStateToUi();
-            bool targetsReady = DisplayCatalog.ResolveFresh(result, _displayState.SelectedMainDisplay?.Display)?.IsAvailable == true &&
+            bool targetsReady = result.Status == DisplayDiscoveryStatus.Complete &&
+                DisplayCatalog.ResolveFresh(result, _displayState.SelectedMainDisplay?.Display)?.IsAvailable == true &&
                 (!_displayState.IsDualDisplay || DisplayCatalog.ResolveFresh(result, _displayState.SelectedSubDisplay?.Display)?.IsAvailable == true);
             _displayInitialization.TrySave(generation, outcome, targetsReady, () => PersistSelectionState(_displayState));
             return result.Status == DisplayDiscoveryStatus.Failed ? DisplayRefreshOutcome.Failed : outcome;
