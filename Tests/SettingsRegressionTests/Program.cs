@@ -10,6 +10,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media.Imaging;
 using Avalonia.Threading;
+using Avalonia.VisualTree;
 using LazyBootstrap;
 using LazyBootstrap.UI;
 using LazyBootstrap.Services;
@@ -134,6 +135,7 @@ internal static class Program
                     "Refreshing toggles overwrote the edited XML.");
                 Assert(menu.SelectedItem is SukiSideMenuItem { Tag: ShellPage.Settings }, "Reloading settings changed the selected page.");
             }
+            await VerifySettingsBorderAlignmentAsync(window);
             await RunDisplayConfigurationAsync(window, paths, xml);
             await RunDisplayRefreshRegressionAsync(window, xml, configPath);
             Invoke(window, "StopDisplayAnimation");
@@ -479,6 +481,21 @@ internal static class Program
         typeof(MainWindow).GetFields(PrivateInstance).Select(field => field.GetValue(window))
             .OfType<SukiUI.Toasts.ISukiToastManager>().Single().DismissAll();
         await Task.Delay(500);
+        double originalWidth = window.Width;
+        try
+        {
+            foreach (double width in new[] { 960d, originalWidth })
+            {
+                window.Width = width;
+                foreach (string target in new[] { "Main", "Sub" })
+                {
+                    Invoke(window, "OnSelect" + target + "DisplayClick", null!, new Avalonia.Interactivity.RoutedEventArgs());
+                    await Task.Delay(150);
+                    VerifyRefreshBorderAlignment(window, target);
+                }
+            }
+        }
+        finally { window.Width = originalWidth; }
         Invoke(window, "OnSelectMainDisplayClick", null!, new Avalonia.Interactivity.RoutedEventArgs());
         await VerifyDisplayPreviewAsync(window, Path.Combine(Environment.CurrentDirectory, "outputs", "display-custom-refresh.png"));
 
@@ -492,6 +509,47 @@ internal static class Program
         await Wait(() => !store.ReadBool("Display", "subcustomrefresh", true));
         AssertRefresh(xml, "60", "60");
         Console.WriteLine("PASS: independent custom refresh switches, text input, validation, XML, compatibility and reload.");
+    }
+
+    private static void VerifyRefreshBorderAlignment(MainWindow window, string target)
+    {
+        var combo = window.FindControl<ComboBox>(target + "ResolutionComboBox")!;
+        var input = window.FindControl<TextBox>(target + "CustomRefreshRateTextBox")!;
+        VerifyBorderAlignment(window, combo, input);
+    }
+
+    private static async Task VerifySettingsBorderAlignmentAsync(MainWindow window)
+    {
+        double originalWidth = window.Width;
+        try
+        {
+            foreach (double width in new[] { 960d, originalWidth })
+            {
+                window.Width = width;
+                await Task.Delay(150);
+                foreach (string name in new[] { "ServerAddressTextBox", "PcbIdTextBox", "WindowSizeTextBox" })
+                {
+                    var combo = window.FindControl<ComboBox>(name == "WindowSizeTextBox" ? "WindowModeComboBox" : "ServerPresetComboBox")!;
+                    VerifyBorderAlignment(window, combo, window.FindControl<TextBox>(name)!);
+                }
+            }
+        }
+        finally { window.Width = originalWidth; }
+        Console.WriteLine("PASS: server preset and graphics textboxes align with dropdown borders at both window widths.");
+    }
+
+    private static void VerifyBorderAlignment(MainWindow window, ComboBox combo, TextBox input)
+    {
+        var comboBorder = combo.GetVisualDescendants().OfType<GlassCard>().Single(control => control.Name == "border");
+        var inputBorder = input.GetVisualDescendants().OfType<GlassCard>().Single(control => control.Name == "PART_GlassBorder");
+        Rect Bounds(Visual visual) => new Rect(visual.Bounds.Size).TransformToAABB(visual.TransformToVisual(window)!.Value);
+        var comboRect = Bounds(comboBorder);
+        var inputRect = Bounds(inputBorder);
+        var inputCell = Bounds((Visual)input.Parent!);
+        double rightInset = Bounds(combo).Right - comboRect.Right;
+        Assert(Math.Abs(comboRect.Left - inputRect.Left) <= 0.5 && Math.Abs(inputCell.Right - rightInset - inputRect.Right) <= 0.5,
+            $"{input.Name} visible borders are misaligned: dropdown left={comboRect.Left:F2}, input left={inputRect.Left:F2}, " +
+            $"expected input right={inputCell.Right - rightInset:F2}, actual right={inputRect.Right:F2}.");
     }
 
     private static async Task VerifyDisplayPreviewAsync(MainWindow window, string? screenshot = null)

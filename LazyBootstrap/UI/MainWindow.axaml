@@ -18,6 +18,10 @@
     </suki:SukiWindow.Hosts>
 
     <suki:SukiWindow.Styles>
+        <!-- Match the 5px outer inset of SukiUI's ComboBox template. -->
+        <Style Selector="TextBox.ComboBoxAligned">
+            <Setter Property="Margin" Value="5,0" />
+        </Style>
         <Style Selector="suki|SukiSideMenu Button">
             <Setter Property="MinHeight" Value="36" />
             <Setter Property="Padding" Value="14,8" />
@@ -313,13 +317,13 @@
                                                                 <Grid ColumnDefinitions="96,*" ColumnSpacing="8"
                                                                       VerticalAlignment="Center">
                                                                     <TextBlock Text="服务器地址" VerticalAlignment="Center" />
-                                                                    <TextBox x:Name="ServerAddressTextBox"
+                                                                    <TextBox x:Name="ServerAddressTextBox" Classes="ComboBoxAligned"
                                                                              Grid.Column="1" />
                                                                 </Grid>
                                                                 <Grid ColumnDefinitions="96,*" ColumnSpacing="8"
                                                                       VerticalAlignment="Center">
                                                                     <TextBlock Text="PCBID" VerticalAlignment="Center" />
-                                                                    <TextBox x:Name="PcbIdTextBox" Grid.Column="1"
+                                                                    <TextBox x:Name="PcbIdTextBox" Classes="ComboBoxAligned" Grid.Column="1"
                                                                              Watermark="根据实际需要填写，否则留空" />
                                                                 </Grid>
                                                             </StackPanel>
@@ -457,7 +461,7 @@
                                                                 <Grid ColumnDefinitions="96,*" ColumnSpacing="8"
                                                                       VerticalAlignment="Center">
                                                                     <TextBlock Text="窗口大小" VerticalAlignment="Center" />
-                                                                    <TextBox x:Name="WindowSizeTextBox" Grid.Column="1"
+                                                                    <TextBox x:Name="WindowSizeTextBox" Classes="ComboBoxAligned" Grid.Column="1"
                                                                              Watermark="1080,1920" />
                                                                 </Grid>
                                                                 <Grid ColumnDefinitions="*,Auto"
@@ -808,7 +812,7 @@
                                                     <Grid Grid.Row="3" Grid.Column="1" ColumnDefinitions="*,Auto" ColumnSpacing="12">
                                                         <Grid>
                                                             <ComboBox x:Name="MainRefreshRateComboBox" />
-                                                            <TextBox x:Name="MainCustomRefreshRateTextBox" IsVisible="False"
+                                                            <TextBox x:Name="MainCustomRefreshRateTextBox" Classes="ComboBoxAligned" IsVisible="False"
                                                                      Watermark="整数，≥60 Hz" />
                                                         </Grid>
                                                         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
@@ -854,7 +858,7 @@
                                                     <Grid Grid.Row="3" Grid.Column="1" ColumnDefinitions="*,Auto" ColumnSpacing="12">
                                                         <Grid>
                                                             <ComboBox x:Name="SubRefreshRateComboBox" />
-                                                            <TextBox x:Name="SubCustomRefreshRateTextBox" IsVisible="False"
+                                                            <TextBox x:Name="SubCustomRefreshRateTextBox" Classes="ComboBoxAligned" IsVisible="False"
                                                                      Watermark="整数，≥60 Hz" />
                                                         </Grid>
                                                         <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
