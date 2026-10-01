@@ -75,7 +75,8 @@ internal static class Program
             var config = (string)defaults.GetMethod("CreateDefaultConfigText", BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null, null)!;
             Assert(config.Contains("compatibilitymode = \"false\""), "New configs do not default compatibility mode to false.");
             // Exercise the missing-key fallback used by existing installations.
-            config = config.Replace("compatibilitymode = \"false\"", "");
+            config = config.Replace("compatibilitymode = \"false\"", "")
+                .Replace("maincustomrefresh = \"false\"", "").Replace("subcustomrefresh = \"false\"", "");
             var configPath = Path.Combine(root, "config.toml");
             File.WriteAllText(configPath, config);
             var paths = Activator.CreateInstance(assembly.GetType("LazyBootstrap.FileSystem.LauncherPaths")!, root, root, configPath)!;
@@ -149,6 +150,7 @@ internal static class Program
         Invoke(window, "InitializeDisplayLayoutControls");
         var toggle = window.FindControl<ToggleSwitch>("DisplayCompatibilityModeToggleSwitch")!;
         Assert(toggle.IsChecked == false && !(bool)Get(state, "CompatibilityMode"), "Old configs enabled compatibility mode.");
+        Assert(!(bool)Get(state, "MainCustomRefresh") && !(bool)Get(state, "SubCustomRefresh"), "Old configs enabled custom refresh input.");
         toggle.IsChecked = true;
         Assert(ReadCompatibility(store), "Compatibility mode was not saved while display configuration was disabled.");
         await InvokeAsync(window, "WarmDisplayStateAsync", state);
@@ -319,11 +321,11 @@ internal static class Program
             foreach (int rotation in new[] { 0, 90, 180, 270 })
             {
                 var resolution = rotation is 90 or 270 ? "1080x1920" : "1920x1080";
-                var options = Invoke(window, "RefreshDisplayOptions", Get(state, "SelectedMainDisplay"), rotation, resolution, "59", true)!;
+                var options = Invoke(window, "RefreshDisplayOptions", Get(state, "SelectedMainDisplay"), rotation, resolution, "59", true, false)!;
                 Assert(((System.Collections.Generic.IEnumerable<string>)Get(options, "RefreshRates")).SequenceEqual(Rates("Main")),
                     "Rotation changed the refresh candidates.");
             }
-            var lower = Invoke(window, "RefreshDisplayOptions", Get(state, "SelectedMainDisplay"), 0, "1280x720", "60", false)!;
+            var lower = Invoke(window, "RefreshDisplayOptions", Get(state, "SelectedMainDisplay"), 0, "1280x720", "60", false, false)!;
             Assert(((System.Collections.Generic.IEnumerable<string>)Get(lower, "RefreshRates")).SequenceEqual(new[] { "92" }),
                 "Refresh rates were mixed between resolutions.");
 
@@ -394,6 +396,8 @@ internal static class Program
             Assert(store.ReadString("Display", "mainrefresh") == "60", "Reload did not migrate a saved 59 Hz selection.");
             AssertRefresh(xml, "60", "87");
 
+            await VerifyCustomRefreshAsync(window, store, state, xml, service);
+
             savedConfig = File.ReadAllText(configPath);
             savedXml = File.ReadAllText(xml);
             Set(state, "SelectedMainDisplay", Choice(""));
@@ -409,6 +413,85 @@ internal static class Program
             Set(state, "IsDisplayConfigurationEnabled", false);
             Invoke(window, "InitializeDisplayServices", originalService, originalTransactions);
         }
+    }
+
+    private static async Task VerifyCustomRefreshAsync(MainWindow window, AppConfigStore store, object state, string xml, DisplayModeFixture service)
+    {
+        const string warning = "请确保输入的自定义刷新率被显示器支持，否则会启动失败";
+        async Task Wait(Func<bool> ready)
+        {
+            var timeout = DateTime.UtcNow.AddSeconds(5);
+            while (!ready() && DateTime.UtcNow < timeout) await Task.Delay(20);
+            Assert(ready(), "Custom refresh UI persistence timed out.");
+            await Task.Delay(30);
+        }
+        object Request() => Invoke(window, "BuildDisplayConfigurationRequest")!;
+        Invoke(window, "ApplyDisplayStateToUi");
+        var mainToggle = window.FindControl<ToggleSwitch>("MainCustomRefreshRateToggleSwitch")!;
+        var subToggle = window.FindControl<ToggleSwitch>("SubCustomRefreshRateToggleSwitch")!;
+        var mainInput = window.FindControl<TextBox>("MainCustomRefreshRateTextBox")!;
+        var subInput = window.FindControl<TextBox>("SubCustomRefreshRateTextBox")!;
+        mainToggle.IsChecked = true;
+        await Wait(() => store.ReadBool("Display", "maincustomrefresh", false));
+        Assert(mainInput.IsVisible && !window.FindControl<ComboBox>("MainRefreshRateComboBox")!.IsVisible &&
+            !subInput.IsVisible && window.FindControl<ComboBox>("SubRefreshRateComboBox")!.IsVisible, "Custom switch did not replace only its own dropdown.");
+        Assert(window.FindControl<TextBlock>("MainCustomRefreshRateWarning")! is { IsVisible: true, Text: warning }, "Custom input warning is missing or incorrect.");
+        mainInput.Text = "900";
+        await Wait(() => store.ReadString("Display", "mainrefresh") == "900");
+        AssertRefresh(xml, "900", "87");
+        Assert((bool)Get(Request(), "MainCustomRefresh") && !(bool)Get(Request(), "SubCustomRefresh"), "Custom flags were not captured independently.");
+        Assert((string)Invoke(window, "ValidateDisplayRefreshRates", Request())! == "", "Custom input was incorrectly restricted to enumerated candidates.");
+        await InvokeAsync(window, "HandleConfigurationChangedAsync", state, true, true, false);
+        Invoke(window, "ApplyDisplayStateToUi");
+        Assert(mainInput.Text == "900", "Redetection replaced custom input.");
+
+        foreach (var invalid in new[] { "", "59", "60.5", "无效", "2147483648" })
+        {
+            mainInput.Text = invalid;
+            await Wait(() => (string)Get(state, "SelectedMainRefreshRate") == invalid);
+            Assert(!window.FindControl<Button>("PreviewDisplaySettingsButton")!.IsEnabled, "Invalid custom input enabled preview.");
+            Assert(store.ReadString("Display", "mainrefresh") == "900" && Option(xml, "graphics-force-refresh") == "900", "Invalid input overwrote persisted rate.");
+            Assert(((string)Invoke(window, "ValidateDisplayRefreshRates", Request())!).Contains("整数"), "Invalid custom input had no validation message.");
+        }
+        mainInput.Text = "900";
+        await Wait(() => window.FindControl<Button>("PreviewDisplaySettingsButton")!.IsEnabled);
+        var compatibility = window.FindControl<ToggleSwitch>("DisplayCompatibilityModeToggleSwitch")!;
+        compatibility.IsChecked = true;
+        await Wait(() => store.ReadBool("Display", "compatibilitymode", false));
+        AssertRefresh(xml, "", "");
+        var testArgs = new object[] { Request(), null!, null!, CancellationToken.None };
+        Assert(!(bool)Invoke(window, "TryApplyDisplayForLaunch", testArgs)!, "Unsupported custom rate passed Windows compatibility validation.");
+        Assert(service.Tests.Any(call => call.Rate == 900 && call.Flags == 2), "Compatibility mode did not test the manually entered rate.");
+        compatibility.IsChecked = false;
+        await Wait(() => !store.ReadBool("Display", "compatibilitymode", true));
+        AssertRefresh(xml, "900", "87");
+
+        subToggle.IsChecked = true;
+        await Wait(() => store.ReadBool("Display", "subcustomrefresh", false));
+        subInput.Text = "91";
+        await Wait(() => store.ReadString("Display", "subrefresh") == "91");
+        AssertRefresh(xml, "900", "91");
+        Assert(window.FindControl<TextBlock>("SubCustomRefreshRateWarning")! is { IsVisible: true, Text: warning }, "Sub custom input warning is missing.");
+        await InvokeAsync(window, "WarmDisplayStateAsync", state);
+        Invoke(window, "ApplyDisplayStateToUi");
+        Assert(mainToggle.IsChecked == true && subToggle.IsChecked == true && mainInput.Text == "900" && subInput.Text == "91",
+            "Reload did not restore custom flags and rates.");
+        typeof(MainWindow).GetFields(PrivateInstance).Select(field => field.GetValue(window))
+            .OfType<SukiUI.Toasts.ISukiToastManager>().Single().DismissAll();
+        await Task.Delay(500);
+        Invoke(window, "OnSelectMainDisplayClick", null!, new Avalonia.Interactivity.RoutedEventArgs());
+        await VerifyDisplayPreviewAsync(window, Path.Combine(Environment.CurrentDirectory, "outputs", "display-custom-refresh.png"));
+
+        mainToggle.IsChecked = false;
+        await Wait(() => !store.ReadBool("Display", "maincustomrefresh", true));
+        Assert(!mainInput.IsVisible && window.FindControl<ComboBox>("MainRefreshRateComboBox")!.IsVisible &&
+            !window.FindControl<TextBlock>("MainCustomRefreshRateWarning")!.IsVisible, "Disabling custom mode did not restore dropdown.");
+        Assert(store.ReadString("Display", "mainrefresh") == "60" && (string)Get(state, "SelectedSubRefreshRate") == "91",
+            "Dropdown fallback was incorrect or changed the other screen.");
+        subToggle.IsChecked = false;
+        await Wait(() => !store.ReadBool("Display", "subcustomrefresh", true));
+        AssertRefresh(xml, "60", "60");
+        Console.WriteLine("PASS: independent custom refresh switches, text input, validation, XML, compatibility and reload.");
     }
 
     private static async Task VerifyDisplayPreviewAsync(MainWindow window, string? screenshot = null)
