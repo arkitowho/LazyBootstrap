@@ -49,5 +49,5 @@ The launcher relies heavily on Spice2x's functionality
 dotnet build LazyBootstrap.sln -c Release
 
 # Package
-pwsh build.ps1
+build.bat
 ```

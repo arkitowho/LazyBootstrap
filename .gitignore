@@ -18,6 +18,7 @@
 build/
 build_tmp/
 publish/
+/debug/
 
 # Python tool caches
 __pycache__/
