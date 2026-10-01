@@ -130,6 +130,7 @@ internal static class Program
         failed += UpdateRegression.RunAll();
         failed += DisplayRegression.RunAll();
         failed += OperationResultsRegression.RunAll();
+        failed += SpiceCrashRegression.RunAll();
         Console.WriteLine($"失败用例数：{failed}");
         return failed == 0 ? 0 : 1;
     }

@@ -10,9 +10,15 @@ namespace LazyBootstrap.Services
     internal sealed class SpiceCrashLogAnalyzer
     {
         private const string SignalPrefix = "W:signal: exception raised:";
+        private const string WrongDisplaySettingRuleId = "WrongDisplaySetting";
+        private const string WrongDisplaySettingSignal = "WRONG_DISPLAY_SETTING";
 
         private static readonly IReadOnlyList<SpiceCrashErrorRule> ErrorRules =
         [
+            new SpiceCrashErrorRule(
+                WrongDisplaySettingRuleId,
+                "错误的显示器分辨率/刷新率设置",
+                "F:graphics: failed to update display settings"),
             new SpiceCrashErrorRule(
                 "AudioInitFailure",
                 "音频初始化失败",
@@ -88,6 +94,10 @@ namespace LazyBootstrap.Services
 
                 string signal = ExtractSignal(content);
                 var rule = FindMatchingRule(content, out string matchedLine);
+                if (rule?.Id == WrongDisplaySettingRuleId)
+                {
+                    signal = WrongDisplaySettingSignal;
+                }
                 string reasonText = rule?.ReasonText ?? "未知";
 
                 return new SpiceCrashDiagnostic(
