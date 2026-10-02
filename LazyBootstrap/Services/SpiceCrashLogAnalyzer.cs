@@ -12,6 +12,8 @@ namespace LazyBootstrap.Services
         private const string SignalPrefix = "W:signal: exception raised:";
         private const string WrongDisplaySettingRuleId = "WrongDisplaySetting";
         private const string WrongDisplaySettingSignal = "WRONG_DISPLAY_SETTING";
+        private const string MissingDependenciesRuleId = "MissingDependencies";
+        private const string MissingDependencySignal = "MISSING_DEPENDENCY";
 
         private static readonly IReadOnlyList<SpiceCrashErrorRule> ErrorRules =
         [
@@ -33,7 +35,7 @@ namespace LazyBootstrap.Services
                 "PCBID格式不正确",
                 "F:ea3: boot: bad pcbid."),
             new SpiceCrashErrorRule(
-                "MissingDependencies",
+                MissingDependenciesRuleId,
                 "程序无法找到关键依赖文件",
                 "Win32 error 126"),
             new SpiceCrashErrorRule(
@@ -97,6 +99,10 @@ namespace LazyBootstrap.Services
                 if (rule?.Id == WrongDisplaySettingRuleId)
                 {
                     signal = WrongDisplaySettingSignal;
+                }
+                else if (rule?.Id == MissingDependenciesRuleId)
+                {
+                    signal = MissingDependencySignal;
                 }
                 string reasonText = rule?.ReasonText ?? "未知";
 

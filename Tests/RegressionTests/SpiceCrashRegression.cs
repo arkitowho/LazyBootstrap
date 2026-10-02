@@ -34,6 +34,16 @@ internal static class SpiceCrashRegression
         Check("未匹配错误时保留原始异常信号", paths =>
             VerifyDiagnostic(Analyze(paths, "W:signal: exception raised: EXCEPTION_ACCESS_VIOLATION"),
                 "EXCEPTION_ACCESS_VIOLATION", "未知", string.Empty, string.Empty, true), ref failed);
+        Check("Win32 error 126 使用缺失依赖信号并覆盖原始异常信号", paths =>
+        {
+            const string marker = "Win32 error 126";
+            foreach (string prefix in new[] { string.Empty, "W:signal: exception raised: EXCEPTION_ACCESS_VIOLATION\n", "W:signal: exception raised:   \n" })
+                VerifyDiagnostic(Analyze(paths, prefix + marker), "MISSING_DEPENDENCY",
+                    "程序无法找到关键依赖文件", "MissingDependencies", marker, true);
+        }, ref failed);
+        Check("缺失依赖信号不覆盖优先匹配的音频错误", paths =>
+            VerifyDiagnostic(Analyze(paths, "Win32 error 126\nW:dll_entry_init: Failed to boot Audio.\nW:signal: exception raised: REAL_SIGNAL"),
+                "REAL_SIGNAL", "音频初始化失败", "AudioInitFailure", "W:dll_entry_init: Failed to boot Audio.", true), ref failed);
         Check("原有崩溃规则及日文日志编码保持兼容", paths =>
         {
             var cases = new[]
@@ -50,7 +60,7 @@ internal static class SpiceCrashRegression
             };
             foreach (var (id, reason, marker) in cases)
                 VerifyDiagnostic(Analyze(paths, marker + "\nW:signal: exception raised: REAL_SIGNAL"),
-                    "REAL_SIGNAL", reason, id, marker, true);
+                    id == "MissingDependencies" ? "MISSING_DEPENDENCY" : "REAL_SIGNAL", reason, id, marker, true);
         }, ref failed);
         Check("空日志不会误报显示设置错误", paths =>
             VerifyDiagnostic(Analyze(paths, "  \r\n"), "UNKNOWN_SIGNAL", "log.txt 为空，未能识别具体崩溃原因", string.Empty, string.Empty, true), ref failed);
