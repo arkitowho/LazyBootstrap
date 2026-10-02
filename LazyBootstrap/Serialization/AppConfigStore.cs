@@ -78,6 +78,7 @@ internal class AppConfigStore
                 document.UpsertString(sectionName, entry.Key, entry.Value ?? string.Empty);
             foreach (string key in removeKeys)
                 document.RemoveKey(sectionName, key);
+            if (sectionName == AppConfigDefaults.DisplaySectionName) document.NormalizeDisplaySettings();
             // Persist the selection and enabled flag together; failed writes leave both unchanged.
             WriteDocumentLocked(document);
         }

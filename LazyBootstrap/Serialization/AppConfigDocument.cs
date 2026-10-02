@@ -210,6 +210,7 @@ internal sealed class AppConfigDocument
         var prepared = LoadServerPresets(none, AppConfigDefaults.AsphyxiaPresetName, AppConfigDefaults.AsphyxiaDefaultUrl);
         string active = ReadString("Server", "activepreset", null);
         foreach (var entry in missing) UpsertString(entry.Section, entry.Key, entry.Value);
+        NormalizeDisplaySettings();
         foreach (var preset in prepared.Presets.Where(p => p.Name != none))
         {
             var prior = original.FirstOrDefault(p => string.Equals(p.Name, preset.Name, StringComparison.OrdinalIgnoreCase));
@@ -221,6 +222,24 @@ internal sealed class AppConfigDocument
             }
         }
         if (active != prepared.ActivePreset) UpsertString("Server", "activepreset", prepared.ActivePreset);
+    }
+
+    internal void NormalizeDisplaySettings()
+    {
+        const string section = AppConfigDefaults.DisplaySectionName;
+        bool enabled = bool.TryParse(ReadString(section, "displayconfigure"), out var parsed) && parsed;
+        bool compatibilityMode = bool.TryParse(ReadString(section, "compatibilitymode"), out var compatibility) && compatibility;
+        bool dual = string.Equals(ReadString(section, "mode"), "dual", StringComparison.OrdinalIgnoreCase);
+        var keys = AppConfigDefaults.Defaults.Where(entry => entry.Section == section && !bool.TryParse(entry.Value, out _)).Select(entry => entry.Key)
+            .Concat(new[] { "mainrefresh", "subrefresh", "mainscreen", "subscreen" });
+        foreach (string key in keys)
+        {
+            bool refreshRate = key is "mainrefresh" or "subrefresh";
+            if (enabled && (dual || !key.StartsWith("sub", StringComparison.Ordinal)) && (!refreshRate || compatibilityMode)) continue;
+            string value = ReadString(section, key, null);
+            if (value != null && value.Length > 0) UpsertString(section, key, string.Empty);
+        }
+        if (_lines.NormalizeDisplayRotationOrder()) Changed();
     }
 
     private void Changed() { _changed = true; _modelDirty = true; }
@@ -524,6 +543,26 @@ internal sealed class AppConfigDocument
             {
                 _lines.Insert(insertIndex, valueLine);
             }
+        }
+
+        public bool NormalizeDisplayRotationOrder()
+        {
+            if (!TryGetSectionBounds(AppConfigDefaults.DisplaySectionName, out _, out int start, out int end)) return false;
+            int main = -1;
+            int sub = -1;
+            for (int i = start; i < end; i++)
+            {
+                if (!TrySplitKeyValue(_lines[i], out string key, out string value, out _)) continue;
+                if (!string.Equals(key, "mainrotation", StringComparison.OrdinalIgnoreCase) &&
+                    !string.Equals(key, "subrotation", StringComparison.OrdinalIgnoreCase)) continue;
+                // Rotation values normally occupy one line; leave multiline user values intact.
+                if (value.StartsWith("\"\"\"", StringComparison.Ordinal) || value.StartsWith("'''", StringComparison.Ordinal)) return false;
+                if (string.Equals(key, "mainrotation", StringComparison.OrdinalIgnoreCase)) main = i;
+                else sub = i;
+            }
+            if (sub < 0 || main <= sub) return false;
+            (_lines[main], _lines[sub]) = (_lines[sub], _lines[main]);
+            return true;
         }
 
         public bool RemoveKey(string sectionName, string keyName)

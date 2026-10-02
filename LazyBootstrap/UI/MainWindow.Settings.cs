@@ -1748,6 +1748,10 @@ namespace LazyBootstrap.UI
                 await LoadSettingsStateAsync(settings);
                 // spicecfg owns the latest XML values, including cleared ASIO/network selections.
                 await LoadDeferredSettingsStateAsync(settings, preserveCurrentSelection: false);
+                ReadSpiceRefreshRateSelections(_displayState);
+                await HandleConfigurationChangedAsync(_displayState, true, true, persist: false);
+                UpdateDisplayStartupInfo(_displayState);
+                ApplyDisplayStateToUi();
                 _logger.LogInformation("Settings reloaded after spicecfg exit. SpiceXmlPath={SpiceXmlPath}",
                     _paths.ResolveSpiceXmlPath(settings.UseSystemSpiceConfig));
             }

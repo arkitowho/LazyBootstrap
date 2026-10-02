@@ -31,7 +31,9 @@ namespace LazyBootstrap.UI
             state.SelectedMainRefreshRate,
             state.SelectedSubRefreshRate,
             state.MainCustomRefresh,
-            state.SubCustomRefresh);
+            state.SubCustomRefresh,
+            IsSpiceRefreshRate(state.SelectedMainRefreshRate, state.MainSpiceRefreshRate),
+            IsSpiceRefreshRate(state.SelectedSubRefreshRate, state.SubSpiceRefreshRate));
 
         private DispatcherTimer _displayPulseTimer;
         private double _displayPulsePhase = 0d;
@@ -539,9 +541,9 @@ namespace LazyBootstrap.UI
 
             if (DisplayConfigEnabledToggleSwitch != null) DisplayConfigEnabledToggleSwitch.IsEnabled = canConfigure;
             if (RefreshDisplaysButton != null) RefreshDisplaysButton.IsEnabled = enabled && !_isRefreshingDisplays;
-            if (DisplayModeComboBox != null) DisplayModeComboBox.IsEnabled = canConfigure && !_isRefreshingDisplays;
-            if (ExitRestoreToggleSwitch != null) ExitRestoreToggleSwitch.IsEnabled = canConfigure && !_isRefreshingDisplays;
-            if (DisplayCompatibilityModeToggleSwitch != null) DisplayCompatibilityModeToggleSwitch.IsEnabled = canConfigure && !_isRefreshingDisplays;
+            if (DisplayModeComboBox != null) DisplayModeComboBox.IsEnabled = enabled;
+            if (ExitRestoreToggleSwitch != null) ExitRestoreToggleSwitch.IsEnabled = enabled;
+            if (DisplayCompatibilityModeToggleSwitch != null) DisplayCompatibilityModeToggleSwitch.IsEnabled = enabled;
 
             if (DisplayConfigDisabledMask != null)
             {
@@ -722,6 +724,8 @@ namespace LazyBootstrap.UI
             public string SelectedSubResolution { get; set; } = string.Empty;
             public string SelectedMainRefreshRate { get; set; } = string.Empty;
             public string SelectedSubRefreshRate { get; set; } = string.Empty;
+            public string MainSpiceRefreshRate { get; set; } = string.Empty;
+            public string SubSpiceRefreshRate { get; set; } = string.Empty;
             public string MainOutputInfo { get; set; } = string.Empty;
             public string SubOutputInfo { get; set; } = string.Empty;
             public string MainStartupInfo { get; set; } = string.Empty;
@@ -773,6 +777,8 @@ namespace LazyBootstrap.UI
             string SelectedMainRefreshRate,
             string SelectedSubRefreshRate,
             bool MainCustomRefresh,
-            bool SubCustomRefresh);
+            bool SubCustomRefresh,
+            bool MainSpiceRefresh,
+            bool SubSpiceRefresh);
     }
 }

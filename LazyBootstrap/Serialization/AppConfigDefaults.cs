@@ -27,15 +27,13 @@ namespace LazyBootstrap.Serialization
             new ConfigDefaultEntry(DisplaySectionName, "compatibilitymode", "false"),
             new ConfigDefaultEntry(DisplaySectionName, "maincustomrefresh", "false"),
             new ConfigDefaultEntry(DisplaySectionName, "subcustomrefresh", "false"),
-            new ConfigDefaultEntry(DisplaySectionName, "mode", "single"),
+            new ConfigDefaultEntry(DisplaySectionName, "mode", ""),
             new ConfigDefaultEntry(DisplaySectionName, "maindisplayid", ""),
             new ConfigDefaultEntry(DisplaySectionName, "subdisplayid", ""),
-            new ConfigDefaultEntry(DisplaySectionName, "subrotation", "0"),
-            new ConfigDefaultEntry(DisplaySectionName, "mainrotation", "0"),
+            new ConfigDefaultEntry(DisplaySectionName, "mainrotation", ""),
+            new ConfigDefaultEntry(DisplaySectionName, "subrotation", ""),
             new ConfigDefaultEntry(DisplaySectionName, "mainresolution", ""),
-            new ConfigDefaultEntry(DisplaySectionName, "subresolution", ""),
-            new ConfigDefaultEntry(DisplaySectionName, "mainrefresh", ""),
-            new ConfigDefaultEntry(DisplaySectionName, "subrefresh", "")
+            new ConfigDefaultEntry(DisplaySectionName, "subresolution", "")
         ];
 
         internal static string CreateDefaultConfigText()

@@ -183,7 +183,7 @@ internal static class DisplayWorkflowRegression
                 {
                     store.WriteSection("Display", new Dictionary<string, string>
                     {
-                        ["displayconfigure"] = "true", ["maindisplayid"] = "monitor",
+                        ["displayconfigure"] = "true", ["compatibilitymode"] = "true", ["maindisplayid"] = "monitor",
                         ["mainresolution"] = "1920x1080", ["mainrefresh"] = "120"
                     });
                     writes++;
