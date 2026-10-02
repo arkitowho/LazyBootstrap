@@ -188,7 +188,7 @@ class App(ttk.Frame):
                   wraplength=800).grid(row=3, column=0, columnspan=3, sticky="w", padx=24)
         ttk.Checkbutton(self.components, text="编译并加入启动器（含 launcher 和启动.exe）",
                         variable=self.flags["build_launcher"]).grid(row=4, column=0, columnspan=3, sticky="w", pady=(16, 4))
-        ttk.Label(self.components, text="检查并预览时运行仓库 build.ps1；将 build 全部内容加入 source，Launcher.exe 重命名为启动.exe。\n编译会重建 build 目录；launcher 使用镜像更新，会移除安装目标中的多余文件。",
+        ttk.Label(self.components, text="检查并预览时运行仓库 build.bat；将 build 全部内容加入 source，Launcher.exe 重命名为启动.exe。\n编译会重建 build 目录；launcher 使用镜像更新，会移除安装目标中的多余文件。",
                   foreground="#9A4E00", wraplength=800).grid(row=5, column=0, columnspan=3, sticky="w", pady=(0, 10))
         ttk.Checkbutton(self.components, text="下载最新 asphyxia KFC 插件", variable=self.flags["asphyxia_enabled"]).grid(row=6, column=0, columnspan=3, sticky="w", pady=(12, 4))
         ttk.Label(self.components, text="从 22vv0/asphyxia_plugins 发布资产中选择最新的 kfc 开头 ZIP。\n解压至 source/asphyxia/plugins/sdvx@asphyxia；存在单一顶层目录时去掉这一层。",

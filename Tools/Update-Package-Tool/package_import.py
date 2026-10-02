@@ -310,6 +310,52 @@ class ImportPlan:
     additions: dict[str, Entry]
 
 
+def merge_launcher_build(session, manifest, additions, operations):
+    """替换编译载荷及对应安装操作，保留原包快照和其他操作的顺序。"""
+    roots = {operation["source"].upper() for operation in operations}
+    targets = {operation["target"].upper() for operation in operations}
+    directories = {operation["target"].upper() for operation in operations
+                   if additions[operation["source"]].directory}
+    remaining, replaced = [], []
+    insertion = None
+    for operation in manifest["operations"]:
+        target = operation["target"].replace("\\", "/").upper()
+        if operation["type"] in {"copy", "mirror"} and (target in targets or any(
+                target.startswith(directory + "/") for directory in directories)):
+            if insertion is None:
+                insertion = len(remaining)
+            replaced.append(operation)
+        else:
+            remaining.append(operation)
+
+    references = [operation["source"].replace("\\", "/").upper()
+                  for operation in remaining if "source" in operation]
+    replaced_sources = {operation["source"].replace("\\", "/").upper() for operation in replaced}
+    legacy_roots = set()
+    for source in [operation["source"] for operation in replaced] + list(session.entries):
+        match = re.match(r"(source/components-[0-9a-f]{12}/launcher-build/[^/]+)(?:/|$)",
+                         source.replace("\\", "/"), re.I)
+        if not match:
+            continue
+        root = match.group(1).upper()
+        if source.replace("\\", "/").upper() in replaced_sources or root.rsplit("/", 1)[-1] in {"LAUNCHER", "启动.EXE"}:
+            if not any(reference == root or reference.startswith(root + "/")
+                       or root.startswith(reference + "/") for reference in references):
+                legacy_roots.add(root)
+
+    roots.update(legacy_roots)
+    session.entries = {name: entry for name, entry in session.entries.items()
+                       if not any(name.upper() == root or name.upper().startswith(root + "/") for root in roots)}
+    # 只清理工具旧版生成的空外套目录，下载组件及仍有引用的载荷保持原样。
+    parents = {root.rsplit("/", 1)[0] for root in legacy_roots}
+    parents.update(parent.rsplit("/", 1)[0] for parent in list(parents))
+    for parent in sorted(parents, key=len, reverse=True):
+        if parent not in references and not any(name.upper().startswith(parent + "/") for name in session.entries):
+            session.entries = {name: entry for name, entry in session.entries.items() if name.upper() != parent}
+    insertion = len(remaining) if insertion is None else insertion
+    manifest["operations"] = remaining[:insertion] + operations + remaining[insertion:]
+
+
 def prepare_import(session, options, overwrite=False, progress=lambda message: None, cancel=lambda: None):
     session = deepcopy(session)
     if session.integrity_issues and not session.integrity_accepted:
@@ -351,12 +397,20 @@ def prepare_import(session, options, overwrite=False, progress=lambda message: N
         for relative, entry in scanned.items():
             if relative:
                 name = "启动.exe" if relative.lower() == "launcher.exe" else relative
-                protected(prefix + "/launcher-build/" + name)
-                additions[prefix + "/launcher-build/" + name] = entry
+                if name.split("/")[0].lower() == "launcher":
+                    name = "launcher" + name[len(name.split("/")[0]):]
+                protected("source/" + name)
+                if "source/" + name in additions:
+                    raise ValueError("编译产物与包内载荷路径冲突：" + name)
+                additions["source/" + name] = entry
+        build_operations = []
         for child in sorted(build_dir.iterdir(), key=lambda p: (p.name.lower() != "launcher", p.name.lower())):
-            name = "启动.exe" if child.name.lower() == "launcher.exe" else child.name
-            manifest["operations"].append({"type": "mirror" if name.lower() == "launcher" else "copy",
-                                            "source": prefix + "/launcher-build/" + name, "target": target_path(name)})
+            name = "启动.exe" if child.name.lower() == "launcher.exe" else "launcher" if child.name.lower() == "launcher" else child.name
+            if name.lower() in {"contents", "asphyxia", "extras"}:
+                raise ValueError("编译产物与包内载荷路径冲突：" + name)
+            build_operations.append({"type": "mirror" if name == "launcher" else "copy",
+                                     "source": "source/" + name, "target": target_path(name)})
+        merge_launcher_build(session, manifest, additions, build_operations)
     if options.download_spice:
         manifest["operations"].append({"type": "copy", "source": prefix + "/spice/spice64.exe", "target": "contents/spice64.exe"})
     if options.asphyxia_enabled:
