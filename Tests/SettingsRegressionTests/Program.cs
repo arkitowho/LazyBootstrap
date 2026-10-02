@@ -153,6 +153,12 @@ internal static class Program
         var toggle = window.FindControl<ToggleSwitch>("DisplayCompatibilityModeToggleSwitch")!;
         Assert(toggle.IsChecked == false && !(bool)Get(state, "CompatibilityMode"), "Old configs enabled compatibility mode.");
         Assert(!(bool)Get(state, "MainCustomRefresh") && !(bool)Get(state, "SubCustomRefresh"), "Old configs enabled custom refresh input.");
+        foreach (string target in new[] { "Main", "Sub" })
+        {
+            var combo = window.FindControl<ComboBox>(target + "RefreshRateComboBox")!;
+            Assert(Equals(combo.Items[0], "不修改") && combo.SelectedIndex == -1,
+                "Disabled configuration lacks unchanged option or automatically selected it for empty legacy values.");
+        }
         toggle.IsChecked = true;
         Assert(ReadCompatibility(store), "Compatibility mode was not saved while display configuration was disabled.");
         await InvokeAsync(window, "WarmDisplayStateAsync", state);
@@ -311,8 +317,8 @@ internal static class Program
             }
             await Refresh();
             Invoke(window, "ApplyDisplayStateToUi");
-            Assert(Rates("Main").SequenceEqual(new[] { "60", "73", "75", "489" }), "Main refresh candidates are not filtered, sorted or complete: " + string.Join(",", Rates("Main")));
-            Assert(Rates("Sub").SequenceEqual(new[] { "60", "87" }), "Sub display inherited main refresh rates.");
+            Assert(Rates("Main").SequenceEqual(new[] { "不修改", "60", "73", "75", "489" }), "Main refresh candidates are not filtered, sorted or complete: " + string.Join(",", Rates("Main")));
+            Assert(Rates("Sub").SequenceEqual(new[] { "不修改", "60", "87" }), "Sub display inherited main refresh rates.");
             Assert((string)Get(state, "SelectedMainRefreshRate") == "60" && (string)Get(state, "SelectedSubRefreshRate") == "60",
                 "Old unsupported rates did not select the lowest supported integer.");
             Assert(store.ReadString("Display", "mainrefresh") == "60", "Automatic replacement was not saved.");
@@ -328,7 +334,7 @@ internal static class Program
                     "Rotation changed the refresh candidates.");
             }
             var lower = Invoke(window, "RefreshDisplayOptions", Get(state, "SelectedMainDisplay"), 0, "1280x720", "60", false, false)!;
-            Assert(((System.Collections.Generic.IEnumerable<string>)Get(lower, "RefreshRates")).SequenceEqual(new[] { "92" }),
+            Assert(((System.Collections.Generic.IEnumerable<string>)Get(lower, "RefreshRates")).SequenceEqual(new[] { "不修改", "92" }),
                 "Refresh rates were mixed between resolutions.");
 
             foreach (bool compatibility in new[] { true, false })
@@ -371,7 +377,7 @@ internal static class Program
             service.Raw["DISPLAY1"] = new[] { (1920, 1080, 59) };
             await Refresh(persist: true);
             Invoke(window, "ApplyDisplayStateToUi");
-            Assert(Rates("Main").Length == 0 && (string)Get(state, "SelectedMainRefreshRate") == "",
+            Assert(Rates("Main").SequenceEqual(new[] { "不修改" }) && (string)Get(state, "SelectedMainRefreshRate") == "",
                 "No eligible modes retained an invalid refresh selection.");
             Assert(((IList)Get(state, "MainResolutions")).Contains("1920x1080"), "Refresh filter removed the resolution.");
             Assert(((string)Get(state, "MainDiagnosticsTooltip")).Contains("60 Hz"), "Missing eligible modes had no Chinese guidance.");
@@ -399,13 +405,14 @@ internal static class Program
             AssertRefresh(xml, "60", "87");
 
             await VerifyCustomRefreshAsync(window, store, state, xml, service);
+            await VerifyUnchangedRefreshAsync(window, store, state, xml, service);
 
             savedConfig = File.ReadAllText(configPath);
             savedXml = File.ReadAllText(xml);
             Set(state, "SelectedMainDisplay", Choice(""));
             Set(state, "SelectedMainRefreshRate", "59");
             await Refresh(persist: true);
-            Assert(Rates("Main").Length == 0 && File.ReadAllText(configPath) == savedConfig && File.ReadAllText(xml) == savedXml,
+            Assert(Rates("Main").SequenceEqual(new[] { "不修改" }) && File.ReadAllText(configPath) == savedConfig && File.ReadAllText(xml) == savedXml,
                 "Disconnected output injected old refresh rates or changed persisted configuration.");
             Assert(service.Tests.All(call => call.Flags == 2), "Detection applied a system display setting.");
             Console.WriteLine("PASS: integer refresh filtering, custom modes, automatic migration, preflight rejection and failure persistence.");
@@ -509,6 +516,188 @@ internal static class Program
         await Wait(() => !store.ReadBool("Display", "subcustomrefresh", true));
         AssertRefresh(xml, "60", "60");
         Console.WriteLine("PASS: independent custom refresh switches, text input, validation, XML, compatibility and reload.");
+    }
+
+    private static async Task VerifyUnchangedRefreshAsync(MainWindow window, AppConfigStore store, object state, string xml, DisplayModeFixture service)
+    {
+        const string unchanged = "不修改";
+        object Request() => Invoke(window, "BuildDisplayConfigurationRequest")!;
+        async Task Wait(Func<bool> ready)
+        {
+            var timeout = DateTime.UtcNow.AddSeconds(5);
+            while (!ready() && DateTime.UtcNow < timeout) await Task.Delay(20);
+            Assert(ready(), "Unchanged refresh UI persistence timed out.");
+            await Task.Delay(30);
+        }
+        Task Refresh() => InvokeAsync(window, "HandleConfigurationChangedAsync", state, true, true, false);
+        var mainCombo = window.FindControl<ComboBox>("MainRefreshRateComboBox")!;
+        var subCombo = window.FindControl<ComboBox>("SubRefreshRateComboBox")!;
+        var mainToggle = window.FindControl<ToggleSwitch>("MainCustomRefreshRateToggleSwitch")!;
+        var subToggle = window.FindControl<ToggleSwitch>("SubCustomRefreshRateToggleSwitch")!;
+        Invoke(window, "ApplyDisplayStateToUi");
+        Assert(Equals(mainCombo.Items[0], unchanged) && Equals(subCombo.Items[0], unchanged), "Unchanged is not first in both dropdowns.");
+
+        mainCombo.SelectedItem = unchanged;
+        await Wait(() => store.ReadString("Display", "mainrefresh") == "unchanged");
+        AssertRefresh(xml, "", "60");
+        Assert(!mainToggle.IsEnabled && mainToggle.IsChecked == false && subToggle.IsEnabled,
+            "Unchanged did not disable only the main custom switch.");
+        Assert(mainCombo.IsEnabled && mainCombo.IsVisible && !window.FindControl<TextBox>("MainCustomRefreshRateTextBox")!.IsVisible &&
+            !window.FindControl<TextBlock>("MainCustomRefreshRateWarning")!.IsVisible, "Unchanged did not retain the dropdown and hide custom input.");
+        mainToggle.IsChecked = true;
+        Assert(mainToggle.IsChecked == false && !(bool)Get(state, "MainCustomRefresh"), "Programmatic custom enable bypassed unchanged guard.");
+        Assert(!store.ReadBool("Display", "maincustomrefresh", true), "Unchanged persisted an enabled custom flag.");
+        Assert(window.FindControl<TextBlock>("MainStartupInfoTextBlock")!.Text!.Contains("刷新率: 不修改（") &&
+            !window.FindControl<TextBlock>("MainStartupInfoTextBlock")!.Text!.Contains("不修改Hz"), "Unchanged startup summary includes Hz or missing text.");
+
+        mainCombo.SelectedItem = "75";
+        await Wait(() => store.ReadString("Display", "mainrefresh") == "75");
+        Assert(mainToggle.IsEnabled && mainToggle.IsChecked == false, "Numeric selection did not reenable the custom switch in the off state.");
+        mainToggle.IsChecked = true;
+        await Wait(() => store.ReadBool("Display", "maincustomrefresh", false));
+        mainCombo.SelectedItem = unchanged;
+        await Wait(() => store.ReadString("Display", "mainrefresh") == "unchanged" && !store.ReadBool("Display", "maincustomrefresh", true));
+        Assert(mainToggle.IsChecked == false && !mainToggle.IsEnabled && mainCombo.IsVisible,
+            "Selecting unchanged did not turn off an active custom mode.");
+
+        await InvokeAsync(window, "WarmDisplayStateAsync", state);
+        Invoke(window, "ApplyDisplayStateToUi");
+        Assert(Equals(mainCombo.SelectedItem, unchanged) && !mainToggle.IsEnabled && subToggle.IsEnabled,
+            "Reload lost independent unchanged selection or custom lock.");
+        await InvokeAsync(window, "RequestDisplayListRefreshAsync", "UnchangedRegression", true);
+        Assert(Equals(mainCombo.SelectedItem, unchanged), "Manual rediscovery lost unchanged selection.");
+
+        var screenCombo = window.FindControl<ComboBox>("MainScreenComboBox")!;
+        var originalScreen = screenCombo.SelectedItem;
+        screenCombo.SelectedItem = screenCombo.Items.Cast<object>().First(item => !Equals(item, originalScreen));
+        await Wait(() => store.ReadString("Display", "maindisplayid") == "DISPLAY2");
+        Assert(Equals(mainCombo.SelectedItem, unchanged), "Changing monitor cleared unchanged selection.");
+        screenCombo.SelectedItem = originalScreen;
+        await Wait(() => store.ReadString("Display", "maindisplayid") == "DISPLAY1");
+        service.Compatible["DISPLAY1"] = service.Compatible["DISPLAY1"].Append((1280, 720, 60)).ToArray();
+        await Refresh();
+        Invoke(window, "ApplyDisplayStateToUi");
+        var resolutionCombo = window.FindControl<ComboBox>("MainResolutionComboBox")!;
+        resolutionCombo.SelectedItem = "1280x720";
+        await Wait(() => store.ReadString("Display", "mainresolution") == "1280x720");
+        Assert(Equals(mainCombo.SelectedItem, unchanged), "Changing resolution cleared unchanged selection.");
+        resolutionCombo.SelectedItem = "1920x1080";
+        await Wait(() => store.ReadString("Display", "mainresolution") == "1920x1080");
+        var rotationCombo = window.FindControl<ComboBox>("RotationComboBox")!;
+        rotationCombo.SelectedItem = rotationCombo.Items.Cast<object>().Single(item => (int)Get(item, "Angle") == 90);
+        await Wait(() => store.ReadString("Display", "mainrotation") == "90");
+        Assert(Equals(mainCombo.SelectedItem, unchanged), "Changing rotation cleared unchanged selection.");
+        rotationCombo.SelectedItem = rotationCombo.Items.Cast<object>().Single(item => (int)Get(item, "Angle") == 0);
+        await Wait(() => store.ReadString("Display", "mainrotation") == "0");
+
+        subCombo.SelectedItem = unchanged;
+        await Wait(() => store.ReadString("Display", "subrefresh") == "unchanged");
+        AssertRefresh(xml, "", "");
+        Assert(!subToggle.IsEnabled && subToggle.IsChecked == false, "Sub unchanged custom switch is not locked off.");
+        mainCombo.SelectedItem = "60";
+        await Wait(() => store.ReadString("Display", "mainrefresh") == "60");
+        AssertRefresh(xml, "60", "");
+        Assert(mainToggle.IsEnabled && !subToggle.IsEnabled, "Sub unchanged affected the main custom switch.");
+        mainCombo.SelectedItem = unchanged;
+        await Wait(() => store.ReadString("Display", "mainrefresh") == "unchanged");
+        store.WriteString("Display", "maincustomrefresh", "true");
+        await InvokeAsync(window, "WarmDisplayStateAsync", state);
+        Invoke(window, "ApplyDisplayStateToUi");
+        Assert(mainToggle.IsChecked == false && subToggle.IsChecked == false && !mainToggle.IsEnabled && !subToggle.IsEnabled,
+            "Reload did not normalize inconsistent custom flags for unchanged.");
+        Invoke(window, "PersistSelectionState", state);
+        Assert(!store.ReadBool("Display", "maincustomrefresh", true) && !store.ReadBool("Display", "subcustomrefresh", true),
+            "Normalized custom flags were not saved as false.");
+
+        var savedModes = service.Compatible["DISPLAY1"];
+        var savedRaw = service.Raw["DISPLAY1"];
+        service.CurrentRate = 59;
+        service.Compatible["DISPLAY1"] = new[] { (1920, 1080, 59) };
+        service.Raw["DISPLAY1"] = new[] { (1920, 1080, 59) };
+        await Refresh();
+        Invoke(window, "ApplyDisplayStateToUi");
+        Assert(mainCombo.Items.Cast<string>().SequenceEqual(new[] { unchanged }) && mainCombo.SelectedItem?.ToString() == unchanged &&
+            window.FindControl<Button>("PreviewDisplaySettingsButton")!.IsEnabled, "Unchanged cannot be selected with only sub-60 Hz modes.");
+        Assert((string)Invoke(window, "ValidateDisplayRefreshRates", Request())! == "", "Unchanged incorrectly required a numeric refresh mode.");
+
+        // All native calls use the fixture: exercise successful launch and preview without changing the desktop.
+        service.AllowApply = true;
+        var manager = (SukiUI.Dialogs.ISukiDialogManager)typeof(MainWindow).GetField("_dialogManager", PrivateInstance)!.GetValue(window)!;
+        SukiUI.Dialogs.SukiDialogManagerEventHandler restorePreview = (_, args) =>
+        {
+            if (args.Dialog.Title == "显示器预览")
+                Dispatcher.UIThread.Post(() => args.Dialog.ActionButtons.OfType<Button>().Single(button => Equals(button.Content, "还原"))
+                    .RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent)));
+        };
+        manager.OnDialogShown += restorePreview;
+        try
+        {
+            foreach (bool compatibility in new[] { false, true })
+            {
+                Set(state, "CompatibilityMode", compatibility);
+                foreach (bool preview in new[] { false, true })
+                {
+                    service.Changes.Clear();
+                    var result = await (Task<DisplaySettingsTransactionResult>)Invoke(window, "ApplyDisplayTransactionAsync", Request(), preview, CancellationToken.None)!;
+                    Assert(result.Succeeded, "Unchanged launch or preview failed: " + string.Join(";", result.Messages));
+                    var applies = service.Changes.Where(call => call.Flags == 1).Take(2).ToArray();
+                    Assert(applies.Length == 2 && applies.All(call => (call.Fields & 0x00400000) == 0),
+                        "Unchanged launch or preview specified a native display frequency.");
+                    Assert(applies.All(call => (call.Fields & 0x00080000) != 0 && (call.Fields & 0x00100000) != 0),
+                        "Unchanged suppressed resolution changes.");
+                    AssertRefresh(xml, "", "");
+                }
+            }
+        }
+        finally
+        {
+            manager.OnDialogShown -= restorePreview;
+            service.AllowApply = false;
+        }
+
+        async Task AssertRejected()
+        {
+            var beforeXml = File.ReadAllText(xml);
+            service.Changes.Clear();
+            foreach (bool preview in new[] { false, true })
+            {
+                var result = await (Task<DisplaySettingsTransactionResult>)Invoke(window, "ApplyDisplayTransactionAsync", Request(), preview, CancellationToken.None)!;
+                Assert(!result.Succeeded && !string.IsNullOrEmpty(result.UserMessage), "Unchanged bypassed display or resolution validation.");
+            }
+            Assert(service.Changes.All(call => call.Flags == 2) && File.ReadAllText(xml) == beforeXml,
+                "Invalid unchanged selection applied settings or changed XML.");
+        }
+        service.FailDevice = "DISPLAY1";
+        await Refresh();
+        Invoke(window, "ApplyDisplayStateToUi");
+        Assert(mainCombo.SelectedItem?.ToString() == unchanged && !window.FindControl<Button>("PreviewDisplaySettingsButton")!.IsEnabled,
+            "Incomplete discovery lost unchanged intent or enabled preview.");
+        await AssertRejected();
+        service.FailDevice = "";
+        Set(state, "SelectedMainResolution", "9999x9999");
+        await AssertRejected();
+        Set(state, "SelectedMainResolution", "1920x1080");
+        var mainDisplay = Get(state, "SelectedMainDisplay");
+        Set(state, "SelectedMainDisplay", null);
+        await AssertRejected();
+        Set(state, "SelectedMainDisplay", mainDisplay);
+
+        service.CurrentRate = 60;
+        service.Compatible["DISPLAY1"] = savedModes;
+        service.Raw["DISPLAY1"] = savedRaw;
+        Set(state, "CompatibilityMode", false);
+        await Refresh();
+        Invoke(window, "ApplyDisplayStateToUi");
+        Set(state, "IsDualDisplay", false);
+        Invoke(window, "ApplyDisplayStateToUi");
+        Assert(!subCombo.IsEnabled && !subToggle.IsEnabled, "Single-display mode enabled sub refresh controls.");
+        Set(state, "IsDualDisplay", true);
+        Invoke(window, "ApplyDisplayStateToUi");
+        mainCombo.SelectedItem = "60";
+        await Wait(() => store.ReadString("Display", "mainrefresh") == "60");
+        subCombo.SelectedItem = "60";
+        await Wait(() => store.ReadString("Display", "subrefresh") == "60");
+        Console.WriteLine("PASS: unchanged refresh selection, independent custom locks, persistence, rediscovery, optional native frequency and validation.");
     }
 
     private static void VerifyRefreshBorderAlignment(MainWindow window, string target)

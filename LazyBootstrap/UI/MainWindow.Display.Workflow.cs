@@ -26,6 +26,22 @@ namespace LazyBootstrap.UI
         private const string SubDisplayIdConfigKey = "subdisplayid";
         private const string LegacyMainScreenConfigKey = "mainscreen";
         private const string LegacySubScreenConfigKey = "subscreen";
+        private const string UnchangedRefreshRateOption = "不修改";
+        private const string UnchangedRefreshRateConfigValue = "unchanged";
+
+        private static bool IsUnchangedRefreshRate(string value) => value == UnchangedRefreshRateOption;
+
+        private static string ReadRefreshRateSelection(string value) =>
+            value == UnchangedRefreshRateConfigValue ? UnchangedRefreshRateOption : value;
+
+        private static string WriteRefreshRateSelection(string value) =>
+            IsUnchangedRefreshRate(value) ? UnchangedRefreshRateConfigValue : value ?? string.Empty;
+
+        private static void NormalizeUnchangedRefreshSelections(DisplayConfigurationState state)
+        {
+            if (IsUnchangedRefreshRate(state.SelectedMainRefreshRate)) state.MainCustomRefresh = false;
+            if (IsUnchangedRefreshRate(state.SelectedSubRefreshRate)) state.SubCustomRefresh = false;
+        }
 
         private WindowsDisplayConfigurationService _displayConfigurationService = null!;
         private DisplaySettingsTransactionCoordinator _displaySettingsTransactionCoordinator = null!;
@@ -101,8 +117,9 @@ namespace LazyBootstrap.UI
                 state.SelectedSubRotation = state.Rotations.FirstOrDefault(option => option.Angle == subRotation) ?? state.Rotations.FirstOrDefault();
                 state.SelectedMainResolution = _appConfig.ReadString(AppConfigDefaults.DisplaySectionName, "mainresolution", string.Empty);
                 state.SelectedSubResolution = _appConfig.ReadString(AppConfigDefaults.DisplaySectionName, "subresolution", string.Empty);
-                state.SelectedMainRefreshRate = _appConfig.ReadString(AppConfigDefaults.DisplaySectionName, "mainrefresh", string.Empty);
-                state.SelectedSubRefreshRate = _appConfig.ReadString(AppConfigDefaults.DisplaySectionName, "subrefresh", string.Empty);
+                state.SelectedMainRefreshRate = ReadRefreshRateSelection(_appConfig.ReadString(AppConfigDefaults.DisplaySectionName, "mainrefresh", string.Empty));
+                state.SelectedSubRefreshRate = ReadRefreshRateSelection(_appConfig.ReadString(AppConfigDefaults.DisplaySectionName, "subrefresh", string.Empty));
+                NormalizeUnchangedRefreshSelections(state);
                 state.SelectedTarget = DisplaySelectionTarget.None;
                 state.ShowNoScreenSelected = true;
                 state.ShowMainScreenConfig = false;
@@ -116,6 +133,7 @@ namespace LazyBootstrap.UI
         private Task PersistGeneralSettingsAsync(DisplayConfigurationState state)
         {
             ArgumentNullException.ThrowIfNull(state);
+            NormalizeUnchangedRefreshSelections(state);
             _logger.LogInformation("Display general settings persistence started.");
 
             if (state.IsDisplayConfigurationEnabled)
@@ -145,6 +163,7 @@ namespace LazyBootstrap.UI
 
         private async Task<DisplayRefreshOutcome> HandleConfigurationChangedAsync(DisplayConfigurationState state, bool refreshMainOptions, bool refreshSubOptions, bool persist = true)
         {
+            NormalizeUnchangedRefreshSelections(state);
             if (!state.IsDisplayConfigurationEnabled) return DisplayRefreshOutcome.Canceled;
             if (IsDisplayDetectionPaused) return DisplayRefreshOutcome.Deferred;
             long revision = ++_displayRevision;
@@ -419,7 +438,7 @@ namespace LazyBootstrap.UI
             {
                 return new DisplayModeOptions(
                     string.IsNullOrWhiteSpace(selectedResolution) ? Array.Empty<string>() : new[] { selectedResolution },
-                    Array.Empty<string>(),
+                    new[] { UnchangedRefreshRateOption },
                     selectedResolution, selectedRefreshRate, "显示器暂未连接，已保留原配置。");
             }
 
@@ -448,12 +467,14 @@ namespace LazyBootstrap.UI
                 .Select(value => value.ToString(CultureInfo.InvariantCulture))
                 .ToList();
 
-            if (!customRefresh && supportedModesResult.Succeeded && !refreshItems.Contains(selectedRefreshRate ?? string.Empty, StringComparer.OrdinalIgnoreCase))
+            if (!IsUnchangedRefreshRate(selectedRefreshRate) && !customRefresh && supportedModesResult.Succeeded && !refreshItems.Contains(selectedRefreshRate ?? string.Empty, StringComparer.OrdinalIgnoreCase))
             {
                 selectedRefreshRate = refreshItems.FirstOrDefault() ?? string.Empty;
             }
             if (!customRefresh && supportedModesResult.Succeeded && refreshItems.Count == 0)
-                tooltip = "所选分辨率没有可用的 60 Hz 及以上刷新率，无法预览或启动，请选择其他分辨率或重新检测。";
+                tooltip = "所选分辨率没有可用的 60 Hz 及以上刷新率，请选择“不修改”、其他分辨率或重新检测。";
+
+            refreshItems.Insert(0, UnchangedRefreshRateOption);
 
             return new DisplayModeOptions(resolutionItems, refreshItems, selectedResolution, selectedRefreshRate, tooltip, supportedModesResult.Succeeded);
         }
@@ -462,13 +483,17 @@ namespace LazyBootstrap.UI
         {
             string Validate(DisplayChoiceOption display, int rotation, string resolution, string refreshRate, bool customRefresh, string label)
             {
-                if (!int.TryParse(refreshRate, NumberStyles.Integer, CultureInfo.InvariantCulture, out int rate) ||
-                    rate < WindowsDisplayConfigurationService.MinimumSelectableRefreshRate)
+                bool unchanged = IsUnchangedRefreshRate(refreshRate);
+                int rate = 0;
+                if (!unchanged && (!int.TryParse(refreshRate, NumberStyles.Integer, CultureInfo.InvariantCulture, out rate) ||
+                    rate < WindowsDisplayConfigurationService.MinimumSelectableRefreshRate))
                     return $"{label}刷新率无效，请输入或选择 60 Hz 及以上的整数刷新率。";
+                if (display?.Display?.IsAvailable != true)
+                    return $"{label}未选择可用的显示器，请重新检测后重试。";
                 var result = _displayConfigurationService.GetSupportedModes(display.Display.DeviceName);
                 if (!result.Succeeded)
                     return $"无法完整读取{label}的显示模式，请重新检测后重试。";
-                return result.Modes.Any(mode => (customRefresh || mode.RefreshRate == rate) &&
+                return result.Modes.Any(mode => (unchanged || customRefresh || mode.RefreshRate == rate) &&
                     NormalizeResolutionByRotation(mode.Width, mode.Height, rotation) == resolution)
                     ? string.Empty : $"{label}不支持所选分辨率和刷新率，请重新检测后选择有效值。";
             }
@@ -481,9 +506,9 @@ namespace LazyBootstrap.UI
 
         private static bool AreDisplaySelectionsReady(DisplayConfigurationState state)
         {
-            bool RefreshReady(bool custom, List<string> rates, string value) => custom
+            bool RefreshReady(bool custom, List<string> rates, string value) => IsUnchangedRefreshRate(value) || (custom
                 ? TryNormalizeSpiceRefreshRate(value, out string normalized) && normalized.Length > 0
-                : rates.Contains(value);
+                : rates.Contains(value));
             bool mainReady = state.MainModeQuerySucceeded && state.SelectedMainDisplay?.Display?.IsAvailable == true &&
                 RefreshReady(state.MainCustomRefresh, state.MainRefreshRates, state.SelectedMainRefreshRate) && state.MainResolutions.Contains(state.SelectedMainResolution);
             bool subReady = !state.IsDualDisplay || (state.SubModeQuerySucceeded && state.SelectedSubDisplay?.Display?.IsAvailable == true &&
@@ -591,6 +616,7 @@ namespace LazyBootstrap.UI
 
         private void PersistSelectionState(DisplayConfigurationState state)
         {
+            NormalizeUnchangedRefreshSelections(state);
             if (state.IsDisplayConfigurationEnabled && !AreDisplaySelectionsReady(state)) return;
             _logger.LogDebug("Persisting display selection state.");
             _appConfig.WriteSection(AppConfigDefaults.DisplaySectionName, new Dictionary<string, string>
@@ -607,8 +633,8 @@ namespace LazyBootstrap.UI
                 ["subrotation"] = (state.SelectedSubRotation?.Angle ?? 0).ToString(),
                 ["mainresolution"] = state.SelectedMainResolution ?? string.Empty,
                 ["subresolution"] = state.SelectedSubResolution ?? string.Empty,
-                ["mainrefresh"] = state.SelectedMainRefreshRate ?? string.Empty,
-                ["subrefresh"] = state.SelectedSubRefreshRate ?? string.Empty
+                ["mainrefresh"] = WriteRefreshRateSelection(state.SelectedMainRefreshRate),
+                ["subrefresh"] = WriteRefreshRateSelection(state.SelectedSubRefreshRate)
             }, new[] {
                 state.SelectedMainDisplay != null ? LegacyMainScreenConfigKey : null,
                 state.SelectedSubDisplay != null ? LegacySubScreenConfigKey : null
@@ -730,7 +756,7 @@ namespace LazyBootstrap.UI
         {
             value = string.Empty;
             // Selections can be empty while the display's supported modes are being refreshed.
-            if (string.IsNullOrWhiteSpace(selectedRate)) return true;
+            if (string.IsNullOrWhiteSpace(selectedRate) || IsUnchangedRefreshRate(selectedRate)) return true;
             if (!int.TryParse(selectedRate, NumberStyles.Integer, CultureInfo.InvariantCulture, out int refreshRate) ||
                 refreshRate < WindowsDisplayConfigurationService.MinimumSelectableRefreshRate)
                 return false;
@@ -798,13 +824,15 @@ namespace LazyBootstrap.UI
                 return false;
             }
 
-            if (!int.TryParse(refreshRate, NumberStyles.Integer, CultureInfo.InvariantCulture, out int parsedRefresh) ||
-                parsedRefresh < WindowsDisplayConfigurationService.MinimumSelectableRefreshRate)
+            bool unchanged = IsUnchangedRefreshRate(refreshRate);
+            int parsedRefresh = 0;
+            if (!unchanged && (!int.TryParse(refreshRate, NumberStyles.Integer, CultureInfo.InvariantCulture, out parsedRefresh) ||
+                parsedRefresh < WindowsDisplayConfigurationService.MinimumSelectableRefreshRate))
             {
                 messages.Add($"{targetName}刷新率无效，请选择 60 Hz 及以上刷新率: {refreshRate}");
                 return false;
             }
-            int? refreshValue = compatibilityMode ? parsedRefresh : null;
+            int? refreshValue = compatibilityMode && !unchanged ? parsedRefresh : null;
 
             requests.Add(new DisplaySettingsRequest(targetName, selectedDisplay.Display.DeviceName, rotation, width, height, refreshValue));
             return true;
@@ -903,6 +931,7 @@ namespace LazyBootstrap.UI
 
         private static string FormatRefreshRateDisplay(string refreshRate)
         {
+            if (IsUnchangedRefreshRate(refreshRate)) return UnchangedRefreshRateOption;
             return string.IsNullOrWhiteSpace(refreshRate) ? "未设置" : $"{refreshRate}Hz";
         }
 

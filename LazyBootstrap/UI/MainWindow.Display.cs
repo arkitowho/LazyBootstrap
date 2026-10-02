@@ -101,7 +101,7 @@ namespace LazyBootstrap.UI
                         {
                             SyncMainSelectionFromUi();
                             _displayState.SelectedMainResolution = string.Empty;
-                            if (!_displayState.MainCustomRefresh) _displayState.SelectedMainRefreshRate = string.Empty;
+                            if (!_displayState.MainCustomRefresh && !IsUnchangedRefreshRate(_displayState.SelectedMainRefreshRate)) _displayState.SelectedMainRefreshRate = string.Empty;
                         }, refreshMainOptions: true, refreshSubOptions: false);
                     };
                 }
@@ -114,7 +114,7 @@ namespace LazyBootstrap.UI
                         {
                             SyncSubSelectionFromUi();
                             _displayState.SelectedSubResolution = string.Empty;
-                            if (!_displayState.SubCustomRefresh) _displayState.SelectedSubRefreshRate = string.Empty;
+                            if (!_displayState.SubCustomRefresh && !IsUnchangedRefreshRate(_displayState.SelectedSubRefreshRate)) _displayState.SelectedSubRefreshRate = string.Empty;
                         }, refreshMainOptions: false, refreshSubOptions: true);
                     };
                 }
@@ -255,6 +255,11 @@ namespace LazyBootstrap.UI
         private async Task HandleCustomRefreshChangedAsync(bool main)
         {
             if (ShouldSkipDisplayLayoutInteraction()) return;
+            if (IsUnchangedRefreshRate(main ? _displayState.SelectedMainRefreshRate : _displayState.SelectedSubRefreshRate))
+            {
+                ApplyDisplayStateToUi();
+                return;
+            }
             bool enabled = (main ? MainCustomRefreshRateToggleSwitch : SubCustomRefreshRateToggleSwitch)?.IsChecked == true;
             if (main) _displayState.MainCustomRefresh = enabled;
             else _displayState.SubCustomRefresh = enabled;
@@ -334,8 +339,10 @@ namespace LazyBootstrap.UI
             _displayState.SelectedMainDisplay = GetSelectedDisplayOption(MainScreenComboBox);
             _displayState.SelectedMainRotation = GetSelectedRotationOption(RotationComboBox);
             _displayState.SelectedMainResolution = GetSelectedComboBoxText(MainResolutionComboBox);
-            _displayState.SelectedMainRefreshRate = _displayState.MainCustomRefresh
-                ? MainCustomRefreshRateTextBox?.Text ?? string.Empty : GetSelectedComboBoxText(MainRefreshRateComboBox);
+            string refreshRate = GetSelectedComboBoxText(MainRefreshRateComboBox);
+            _displayState.SelectedMainRefreshRate = _displayState.MainCustomRefresh && !IsUnchangedRefreshRate(refreshRate)
+                ? MainCustomRefreshRateTextBox?.Text ?? string.Empty : refreshRate;
+            NormalizeUnchangedRefreshSelections(_displayState);
         }
 
         private void SyncSubSelectionFromUi()
@@ -343,8 +350,10 @@ namespace LazyBootstrap.UI
             _displayState.SelectedSubDisplay = GetSelectedDisplayOption(SubScreenComboBox);
             _displayState.SelectedSubRotation = GetSelectedRotationOption(SubRotationComboBox);
             _displayState.SelectedSubResolution = GetSelectedComboBoxText(SubResolutionComboBox);
-            _displayState.SelectedSubRefreshRate = _displayState.SubCustomRefresh
-                ? SubCustomRefreshRateTextBox?.Text ?? string.Empty : GetSelectedComboBoxText(SubRefreshRateComboBox);
+            string refreshRate = GetSelectedComboBoxText(SubRefreshRateComboBox);
+            _displayState.SelectedSubRefreshRate = _displayState.SubCustomRefresh && !IsUnchangedRefreshRate(refreshRate)
+                ? SubCustomRefreshRateTextBox?.Text ?? string.Empty : refreshRate;
+            NormalizeUnchangedRefreshSelections(_displayState);
         }
 
         private DisplayChoiceOption GetSelectedDisplayOption(ComboBox comboBox)
@@ -400,6 +409,7 @@ namespace LazyBootstrap.UI
 
             try
             {
+                NormalizeUnchangedRefreshSelections(_displayState);
                 ReplaceComboBoxItems(MainScreenComboBox, _displayState.Displays);
                 ReplaceComboBoxItems(SubScreenComboBox, _displayState.Displays);
                 ReplaceComboBoxItems(RotationComboBox, _displayState.Rotations);
@@ -543,7 +553,7 @@ namespace LazyBootstrap.UI
             if (MainResolutionComboBox != null) MainResolutionComboBox.IsEnabled = enabled;
             if (MainRefreshRateComboBox != null) MainRefreshRateComboBox.IsEnabled = enabled;
             MainCustomRefreshRateTextBox.IsEnabled = enabled;
-            MainCustomRefreshRateToggleSwitch.IsEnabled = enabled;
+            MainCustomRefreshRateToggleSwitch.IsEnabled = enabled && !IsUnchangedRefreshRate(_displayState.SelectedMainRefreshRate);
             if (PreviewDisplaySettingsButton != null) PreviewDisplaySettingsButton.IsEnabled = enabled && AreDisplaySelectionsReady(_displayState);
 
             if (SelectMainScreenAreaButton != null)
@@ -567,7 +577,7 @@ namespace LazyBootstrap.UI
             if (SubResolutionComboBox != null) SubResolutionComboBox.IsEnabled = subEnabled;
             if (SubRefreshRateComboBox != null) SubRefreshRateComboBox.IsEnabled = subEnabled;
             SubCustomRefreshRateTextBox.IsEnabled = subEnabled;
-            SubCustomRefreshRateToggleSwitch.IsEnabled = subEnabled;
+            SubCustomRefreshRateToggleSwitch.IsEnabled = subEnabled && !IsUnchangedRefreshRate(_displayState.SelectedSubRefreshRate);
 
             if (!isDualDisplay && selectedTarget == DisplaySelectionTarget.Sub)
             {
@@ -694,8 +704,8 @@ namespace LazyBootstrap.UI
             public List<RotationOption> Rotations { get; } = new List<RotationOption>();
             public List<string> MainResolutions { get; } = new List<string>();
             public List<string> SubResolutions { get; } = new List<string>();
-            public List<string> MainRefreshRates { get; } = new List<string>();
-            public List<string> SubRefreshRates { get; } = new List<string>();
+            public List<string> MainRefreshRates { get; } = new List<string> { UnchangedRefreshRateOption };
+            public List<string> SubRefreshRates { get; } = new List<string> { UnchangedRefreshRateOption };
             public bool MainModeQuerySucceeded { get; set; }
             public bool SubModeQuerySucceeded { get; set; }
             public bool IsDisplayConfigurationEnabled { get; set; }
