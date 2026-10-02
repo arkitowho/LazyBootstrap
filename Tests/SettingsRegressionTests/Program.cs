@@ -592,30 +592,43 @@ internal static class Program
         mainCombo.SelectedItem = unchanged;
         await Wait(() => Option(xml, "graphics-force-refresh") == "");
         AssertRefresh(xml, "", "60");
-        Assert(!mainToggle.IsEnabled && mainToggle.IsChecked == false && subToggle.IsEnabled,
-            "Unchanged did not disable only the main custom switch.");
+        Assert(mainToggle.IsEnabled && mainToggle.IsChecked == false && subToggle.IsEnabled,
+            "Unchanged disabled the main custom switch.");
         Assert(mainCombo.IsEnabled && mainCombo.IsVisible && !window.FindControl<TextBox>("MainCustomRefreshRateTextBox")!.IsVisible &&
             !window.FindControl<TextBlock>("MainCustomRefreshRateWarning")!.IsVisible, "Unchanged did not retain the dropdown and hide custom input.");
-        mainToggle.IsChecked = true;
-        Assert(mainToggle.IsChecked == false && !(bool)Get(state, "MainCustomRefresh"), "Programmatic custom enable bypassed unchanged guard.");
         Assert(!store.ReadBool("Display", "maincustomrefresh", true), "Unchanged persisted an enabled custom flag.");
         Assert(window.FindControl<TextBlock>("MainStartupInfoTextBlock")!.Text!.Contains("刷新率: 不修改") &&
             !window.FindControl<TextBlock>("MainStartupInfoTextBlock")!.Text!.Contains("不修改Hz"), "Unchanged startup summary includes Hz or missing text.");
+
+        mainToggle.IsChecked = true;
+        await Wait(() => store.ReadBool("Display", "maincustomrefresh", false));
+        var mainInput = window.FindControl<TextBox>("MainCustomRefreshRateTextBox")!;
+        Assert(mainToggle.IsChecked == true && mainInput.IsVisible && mainInput.Text == "" && !mainCombo.IsVisible,
+            "Enabling custom refresh from unchanged did not show an empty input.");
+        Assert(!window.FindControl<Button>("PreviewDisplaySettingsButton")!.IsEnabled,
+            "Empty custom refresh enabled preview.");
+        mainInput.Text = "73";
+        await Wait(() => Option(xml, "graphics-force-refresh") == "73");
+        AssertRefresh(xml, "73", "60");
+        mainToggle.IsChecked = false;
+        await Wait(() => !store.ReadBool("Display", "maincustomrefresh", true));
 
         mainCombo.SelectedItem = "75";
         await Wait(() => Option(xml, "graphics-force-refresh") == "75");
         Assert(mainToggle.IsEnabled && mainToggle.IsChecked == false, "Numeric selection did not reenable the custom switch in the off state.");
         mainToggle.IsChecked = true;
         await Wait(() => store.ReadBool("Display", "maincustomrefresh", false));
+        mainToggle.IsChecked = false;
+        await Wait(() => !store.ReadBool("Display", "maincustomrefresh", true));
         mainCombo.SelectedItem = unchanged;
         await Wait(() => Option(xml, "graphics-force-refresh") == "" && !store.ReadBool("Display", "maincustomrefresh", true));
-        Assert(mainToggle.IsChecked == false && !mainToggle.IsEnabled && mainCombo.IsVisible,
-            "Selecting unchanged did not turn off an active custom mode.");
+        Assert(mainToggle.IsChecked == false && mainToggle.IsEnabled && mainCombo.IsVisible,
+            "Selecting unchanged disabled the custom switch or hid the dropdown.");
 
         await InvokeAsync(window, "WarmDisplayStateAsync", state);
         Invoke(window, "ApplyDisplayStateToUi");
-        Assert(Equals(mainCombo.SelectedItem, unchanged) && !mainToggle.IsEnabled && subToggle.IsEnabled,
-            "Reload lost independent unchanged selection or custom lock.");
+        Assert(Equals(mainCombo.SelectedItem, unchanged) && mainToggle.IsEnabled && subToggle.IsEnabled,
+            "Reload lost independent unchanged selection or disabled custom switches.");
         await InvokeAsync(window, "RequestDisplayListRefreshAsync", "UnchangedRegression", true);
         Assert(Equals(mainCombo.SelectedItem, unchanged), "Manual rediscovery lost unchanged selection.");
 
@@ -645,17 +658,29 @@ internal static class Program
         subCombo.SelectedItem = unchanged;
         await Wait(() => Option(xml, "graphics-force-refresh-sub") == "");
         AssertRefresh(xml, "", "");
-        Assert(!subToggle.IsEnabled && subToggle.IsChecked == false, "Sub unchanged custom switch is not locked off.");
+        Assert(subToggle.IsEnabled && subToggle.IsChecked == false, "Sub unchanged custom switch is disabled.");
+        subToggle.IsChecked = true;
+        await Wait(() => store.ReadBool("Display", "subcustomrefresh", false));
+        var subInput = window.FindControl<TextBox>("SubCustomRefreshRateTextBox")!;
+        Assert(subToggle.IsChecked == true && subInput.IsVisible && subInput.Text == "" && !subCombo.IsVisible,
+            "Enabling sub custom refresh from unchanged did not show an empty input.");
+        subInput.Text = "87";
+        await Wait(() => Option(xml, "graphics-force-refresh-sub") == "87");
+        AssertRefresh(xml, "", "87");
+        subToggle.IsChecked = false;
+        await Wait(() => !store.ReadBool("Display", "subcustomrefresh", true));
+        subCombo.SelectedItem = unchanged;
+        await Wait(() => Option(xml, "graphics-force-refresh-sub") == "");
         mainCombo.SelectedItem = "60";
         await Wait(() => Option(xml, "graphics-force-refresh") == "60");
         AssertRefresh(xml, "60", "");
-        Assert(mainToggle.IsEnabled && !subToggle.IsEnabled, "Sub unchanged affected the main custom switch.");
+        Assert(mainToggle.IsEnabled && subToggle.IsEnabled, "Sub unchanged disabled a custom switch.");
         mainCombo.SelectedItem = unchanged;
         await Wait(() => Option(xml, "graphics-force-refresh") == "");
         store.WriteString("Display", "maincustomrefresh", "true");
         await InvokeAsync(window, "WarmDisplayStateAsync", state);
         Invoke(window, "ApplyDisplayStateToUi");
-        Assert(mainToggle.IsChecked == false && subToggle.IsChecked == false && !mainToggle.IsEnabled && !subToggle.IsEnabled,
+        Assert(mainToggle.IsChecked == false && subToggle.IsChecked == false && mainToggle.IsEnabled && subToggle.IsEnabled,
             "Reload did not normalize inconsistent custom flags for unchanged.");
         Invoke(window, "PersistSelectionState", state);
         Assert(!store.ReadBool("Display", "maincustomrefresh", true) && !store.ReadBool("Display", "subcustomrefresh", true),
@@ -749,7 +774,7 @@ internal static class Program
         await Wait(() => Option(xml, "graphics-force-refresh") == "60");
         subCombo.SelectedItem = "60";
         await Wait(() => Option(xml, "graphics-force-refresh-sub") == "60");
-        Console.WriteLine("PASS: unchanged refresh selection, independent custom locks, persistence, rediscovery, optional native frequency and validation.");
+        Console.WriteLine("PASS: unchanged refresh selection, custom switches, persistence, rediscovery, optional native frequency and validation.");
     }
 
     private static async Task VerifySpiceRefreshPriorityAsync(MainWindow window, AppConfigStore store, object state, string xml, DisplayModeFixture service)
