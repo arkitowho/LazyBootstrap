@@ -44,6 +44,67 @@ internal static class SpiceCrashRegression
         Check("缺失依赖信号不覆盖优先匹配的音频错误", paths =>
             VerifyDiagnostic(Analyze(paths, "Win32 error 126\nW:dll_entry_init: Failed to boot Audio.\nW:signal: exception raised: REAL_SIGNAL"),
                 "REAL_SIGNAL", "音频初始化失败", "AudioInitFailure", "W:dll_entry_init: Failed to boot Audio.", true), ref failed);
+        var win32Cases = new[]
+        {
+            (2, "FILE_NOT_FOUND", "MissingFile", "找不到指定文件"),
+            (3, "PATH_NOT_FOUND", "MissingPath", "找不到指定路径"),
+            (5, "ACCESS_DENIED", "AccessDenied", "访问被拒绝，程序没有所需权限"),
+            (8, "OUT_OF_MEMORY", "OutOfMemory", "系统可用内存不足，无法完成操作"),
+            (14, "OUT_OF_MEMORY", "OutOfMemory", "系统可用内存不足，无法完成操作"),
+            (32, "FILE_IN_USE", "FileInUse", "文件正被其他进程占用，无法访问"),
+            (127, "MISSING_PROCEDURE", "MissingProcedure", "依赖文件缺少所需函数入口，可能存在版本不匹配"),
+            (216, "MACHINE_TYPE_MISMATCH", "MachineTypeMismatch", "程序与当前系统的处理器架构不匹配"),
+            (577, "INVALID_IMAGE_HASH", "InvalidImageHash", "Windows 无法验证文件的数字签名"),
+            (1114, "DLL_INIT_FAILED", "DllInitFailure", "动态链接库初始化失败"),
+            (1157, "MISSING_DEPENDENCY", "MissingDependencies", "程序无法找到关键依赖文件"),
+            (1260, "BLOCKED_BY_POLICY", "BlockedByPolicy", "程序被系统组策略阻止运行"),
+            (1455, "PAGEFILE_TOO_SMALL", "PagefileTooSmall", "系统分页文件太小，无法完成操作"),
+            (14001, "SIDE_BY_SIDE_CONFIGURATION_ERROR", "SideBySideConfigurationError", "程序的并行配置不正确，请检查所需运行库")
+        };
+        foreach (var (code, signal, id, reason) in win32Cases)
+        {
+            Check($"Win32 error {code} 提供中文原因和专用信号", paths =>
+            {
+                foreach (string prefix in new[] { string.Empty, "W:signal: exception raised: REAL_SIGNAL\n", "W:signal: exception raised:   \n" })
+                {
+                    string marker = "Win32 error " + code;
+                    VerifyDiagnostic(Analyze(paths, prefix + marker), signal, reason, id, marker, true);
+                }
+                foreach (string newline in new[] { "\r\n", "\n", "\r" })
+                {
+                    string line = $"[2026/10/02 12:00:00] W:loader: Win32 error {code} (details)";
+                    VerifyDiagnostic(Analyze(paths, "I:loader: loading" + newline + "  " + line + "  " + newline), signal, reason, id, line, true);
+                }
+            }, ref failed);
+        }
+        Check("Win32 错误码按完整数字匹配且未知编号保留原始信号", paths =>
+        {
+            foreach (string code in new[] { "20", "30", "50", "80", "140", "320", "12600", "1930", "11140", "11570", "140010", "14550", "2147483648", "126abc", "126_", "-126", "+126", "0x7e", string.Empty })
+                VerifyDiagnostic(Analyze(paths, "Win32 error " + code + "\nW:signal: exception raised: REAL_SIGNAL"),
+                    "REAL_SIGNAL", "未知", string.Empty, string.Empty, true);
+        }, ref failed);
+        Check("同一行首个编号未知或无效时仍可识别后续错误码", paths =>
+        {
+            foreach (string firstCode in new[] { "9999", "126abc", string.Empty })
+            {
+                string line = $"Win32 error {firstCode}; Win32 error 126";
+                VerifyDiagnostic(Analyze(paths, line), "MISSING_DEPENDENCY", "程序无法找到关键依赖文件", "MissingDependencies", line, true);
+            }
+        }, ref failed);
+        Check("错误码支持额外空白和前导零", paths =>
+        {
+            const string line = "Win32 error   00126: details";
+            VerifyDiagnostic(Analyze(paths, line), "MISSING_DEPENDENCY", "程序无法找到关键依赖文件", "MissingDependencies", line, true);
+        }, ref failed);
+        Check("新增 Win32 规则不覆盖优先匹配的显示设置或音频错误", paths =>
+        {
+            foreach (var (code, _, _, _) in win32Cases)
+            {
+                VerifyDisplayFailure(paths, "Win32 error " + code + "\n" + DisplayMarker, DisplayMarker);
+                VerifyDiagnostic(Analyze(paths, "Win32 error " + code + "\nW:dll_entry_init: Failed to boot Audio.\nW:signal: exception raised: REAL_SIGNAL"),
+                    "REAL_SIGNAL", "音频初始化失败", "AudioInitFailure", "W:dll_entry_init: Failed to boot Audio.", true);
+            }
+        }, ref failed);
         Check("原有崩溃规则及日文日志编码保持兼容", paths =>
         {
             var cases = new[]

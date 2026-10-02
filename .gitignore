@@ -46,6 +46,7 @@ coverage*.info
 # Agents
 .agents/
 .claude/
+outputs/
 
 # macOS
 .DS_Store

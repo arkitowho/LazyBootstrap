@@ -16,6 +16,7 @@ internal static class Program
     {
         if (args.Contains("--display")) return DisplayRegression.RunAll();
         if (args.Contains("--display-live")) return DisplayRegression.RunLive();
+        if (args.Contains("--spice-crash")) return SpiceCrashRegression.RunAll();
         if (args.Contains("--launcher-smoke-child"))
         {
             string marker = args[Array.IndexOf(args, "--launcher-smoke-child") + 1];
