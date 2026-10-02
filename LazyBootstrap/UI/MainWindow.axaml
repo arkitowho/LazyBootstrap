@@ -18,6 +18,10 @@
     </suki:SukiWindow.Hosts>
 
     <suki:SukiWindow.Styles>
+        <!-- Match the 5px outer inset of SukiUI's ComboBox template. -->
+        <Style Selector="TextBox.ComboBoxAligned">
+            <Setter Property="Margin" Value="5,0" />
+        </Style>
         <Style Selector="suki|SukiSideMenu Button">
             <Setter Property="MinHeight" Value="36" />
             <Setter Property="Padding" Value="14,8" />
@@ -313,13 +317,13 @@
                                                                 <Grid ColumnDefinitions="96,*" ColumnSpacing="8"
                                                                       VerticalAlignment="Center">
                                                                     <TextBlock Text="服务器地址" VerticalAlignment="Center" />
-                                                                    <TextBox x:Name="ServerAddressTextBox"
+                                                                    <TextBox x:Name="ServerAddressTextBox" Classes="ComboBoxAligned"
                                                                              Grid.Column="1" />
                                                                 </Grid>
                                                                 <Grid ColumnDefinitions="96,*" ColumnSpacing="8"
                                                                       VerticalAlignment="Center">
                                                                     <TextBlock Text="PCBID" VerticalAlignment="Center" />
-                                                                    <TextBox x:Name="PcbIdTextBox" Grid.Column="1"
+                                                                    <TextBox x:Name="PcbIdTextBox" Classes="ComboBoxAligned" Grid.Column="1"
                                                                              Watermark="根据实际需要填写，否则留空" />
                                                                 </Grid>
                                                             </StackPanel>
@@ -457,7 +461,7 @@
                                                                 <Grid ColumnDefinitions="96,*" ColumnSpacing="8"
                                                                       VerticalAlignment="Center">
                                                                     <TextBlock Text="窗口大小" VerticalAlignment="Center" />
-                                                                    <TextBox x:Name="WindowSizeTextBox" Grid.Column="1"
+                                                                    <TextBox x:Name="WindowSizeTextBox" Classes="ComboBoxAligned" Grid.Column="1"
                                                                              Watermark="1080,1920" />
                                                                 </Grid>
                                                                 <Grid ColumnDefinitions="*,Auto"
@@ -713,39 +717,41 @@
                                             <suki:BusyArea x:Name="DisplayConfigDisabledMask" IsBusy="True"
                                                            BusyText="显示器配置未启用">
                                                 <Grid HorizontalAlignment="Center" VerticalAlignment="Center"
-                                                      Width="300"
-                                                      Height="540">
-                                                    <Image Source="avares://LazyBootstrap/Assets/Images/cabinet.png"
-                                                           Stretch="Uniform" Width="240" />
-                                                    <Canvas Width="300" Height="540" IsHitTestVisible="False">
-                                                        <Ellipse x:Name="DotMainGlow" Canvas.Left="124"
-                                                                 Canvas.Top="157"
-                                                                 Width="52" Height="52" Fill="#35FFFFFF" />
-                                                        <Ellipse Canvas.Left="139"
-                                                                 Canvas.Top="172"
-                                                                 Width="22" Height="22" Fill="White" />
-                                                        <Ellipse x:Name="DotMainSelectedRing" Canvas.Left="127"
-                                                                 Canvas.Top="160" Width="46" Height="46"
-                                                                 Stroke="#AAFFFFFF"
-                                                                 StrokeThickness="2" IsVisible="False" />
-                                                        <Ellipse x:Name="DotSubGlow" Canvas.Left="124" Canvas.Top="303"
-                                                                 Width="52" Height="52" Fill="#35FFFFFF" />
-                                                        <Ellipse x:Name="DotSubCore" Canvas.Left="139" Canvas.Top="318"
-                                                                 Width="22" Height="22" Fill="White" />
-                                                        <Ellipse x:Name="DotSubSelectedRing" Canvas.Left="127"
-                                                                 Canvas.Top="306"
-                                                                 Width="46" Height="46" Stroke="#AAFFFFFF"
-                                                                 StrokeThickness="2"
-                                                                 IsVisible="False" />
-                                                    </Canvas>
-                                                    <Button x:Name="SelectMainScreenAreaButton" Width="54" Height="54"
-                                                            HorizontalAlignment="Center" VerticalAlignment="Top"
-                                                            Margin="0,155,0,0" Background="Transparent"
-                                                            BorderBrush="Transparent" Click="OnSelectMainDisplayClick" />
-                                                    <Button x:Name="SelectSubScreenAreaButton" Width="54" Height="54"
-                                                            HorizontalAlignment="Center" VerticalAlignment="Top"
-                                                            Margin="0,301,0,0" Background="Transparent"
-                                                            BorderBrush="Transparent" Click="OnSelectSubDisplayClick" />
+                                                      Width="300" MaxHeight="540" ClipToBounds="True">
+                                                    <Grid HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                          Width="300" Height="540">
+                                                        <Image Source="avares://LazyBootstrap/Assets/Images/cabinet.png"
+                                                               Stretch="Uniform" Width="200" />
+                                                        <Canvas Width="300" Height="540" IsHitTestVisible="False">
+                                                            <Ellipse x:Name="DotMainGlow" Canvas.Left="124"
+                                                                     Canvas.Top="157"
+                                                                     Width="52" Height="52" Fill="#35FFFFFF" />
+                                                            <Ellipse Canvas.Left="139"
+                                                                     Canvas.Top="172"
+                                                                     Width="22" Height="22" Fill="White" />
+                                                            <Ellipse x:Name="DotMainSelectedRing" Canvas.Left="127"
+                                                                     Canvas.Top="160" Width="46" Height="46"
+                                                                     Stroke="#AAFFFFFF"
+                                                                     StrokeThickness="2" IsVisible="False" />
+                                                            <Ellipse x:Name="DotSubGlow" Canvas.Left="124" Canvas.Top="303"
+                                                                     Width="52" Height="52" Fill="#35FFFFFF" />
+                                                            <Ellipse x:Name="DotSubCore" Canvas.Left="139" Canvas.Top="318"
+                                                                     Width="22" Height="22" Fill="White" />
+                                                            <Ellipse x:Name="DotSubSelectedRing" Canvas.Left="127"
+                                                                     Canvas.Top="306"
+                                                                     Width="46" Height="46" Stroke="#AAFFFFFF"
+                                                                     StrokeThickness="2"
+                                                                     IsVisible="False" />
+                                                        </Canvas>
+                                                        <Button x:Name="SelectMainScreenAreaButton" Width="54" Height="54"
+                                                                HorizontalAlignment="Center" VerticalAlignment="Top"
+                                                                Margin="0,155,0,0" Background="Transparent"
+                                                                BorderBrush="Transparent" Click="OnSelectMainDisplayClick" />
+                                                        <Button x:Name="SelectSubScreenAreaButton" Width="54" Height="54"
+                                                                HorizontalAlignment="Center" VerticalAlignment="Top"
+                                                                Margin="0,301,0,0" Background="Transparent"
+                                                                BorderBrush="Transparent" Click="OnSelectSubDisplayClick" />
+                                                    </Grid>
                                                 </Grid>
                                             </suki:BusyArea>
                                         </suki:GlassCard>
@@ -755,6 +761,15 @@
                                                 <Grid ColumnDefinitions="*,Auto" VerticalAlignment="Center">
                                                     <TextBlock Text="退出游戏后恢复显示器布局" VerticalAlignment="Center" />
                                                     <ToggleSwitch x:Name="ExitRestoreToggleSwitch" Grid.Column="1"
+                                                                  VerticalAlignment="Center" IsChecked="False" />
+                                                </Grid>
+                                                <Grid ColumnDefinitions="*,Auto" VerticalAlignment="Center">
+                                                    <StackPanel Spacing="4" Margin="0,0,12,0">
+                                                        <TextBlock Text="兼容模式" />
+                                                        <TextBlock Text="默认通过 Spice2x 设置刷新率，开启后直接修改系统刷新率。"
+                                                                   TextWrapping="Wrap" FontSize="12" Opacity="0.7" />
+                                                    </StackPanel>
+                                                    <ToggleSwitch x:Name="DisplayCompatibilityModeToggleSwitch" Grid.Column="1"
                                                                   VerticalAlignment="Center" IsChecked="False" />
                                                 </Grid>
                                                 <Grid ColumnDefinitions="*,Auto" VerticalAlignment="Center">
@@ -784,7 +799,7 @@
                                                                    TextWrapping="Wrap" />
                                                     </StackPanel>
                                                 </suki:GlassCard>
-                                                <Grid RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="Auto,*"
+                                                <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto" ColumnDefinitions="Auto,*"
                                                       ColumnSpacing="12" RowSpacing="10">
                                                     <TextBlock Text="显示器" VerticalAlignment="Center" />
                                                     <ComboBox x:Name="MainScreenComboBox" Grid.Column="1" />
@@ -794,8 +809,20 @@
                                                     <ComboBox x:Name="MainResolutionComboBox" Grid.Row="2"
                                                               Grid.Column="1" />
                                                     <TextBlock Grid.Row="3" Text="刷新率" VerticalAlignment="Center" />
-                                                    <ComboBox x:Name="MainRefreshRateComboBox" Grid.Row="3"
-                                                              Grid.Column="1" />
+                                                    <Grid Grid.Row="3" Grid.Column="1" ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                                        <Grid>
+                                                            <ComboBox x:Name="MainRefreshRateComboBox" />
+                                                            <TextBox x:Name="MainCustomRefreshRateTextBox" Classes="ComboBoxAligned" IsVisible="False"
+                                                                     Watermark="整数，≥60 Hz" />
+                                                        </Grid>
+                                                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                                            <TextBlock Text="自定义" VerticalAlignment="Center" />
+                                                            <ToggleSwitch x:Name="MainCustomRefreshRateToggleSwitch" IsChecked="False" />
+                                                        </StackPanel>
+                                                    </Grid>
+                                                    <TextBlock x:Name="MainCustomRefreshRateWarning" Grid.Row="4" Grid.ColumnSpan="2"
+                                                               Text="请确保输入的自定义刷新率被显示器支持，否则会启动失败"
+                                                               IsVisible="False" TextWrapping="Wrap" FontSize="12" Opacity="0.7" />
                                                 </Grid>
                                                 <suki:GlassCard>
                                                     <StackPanel Margin="12" Spacing="6">
@@ -818,7 +845,7 @@
                                                                    TextWrapping="Wrap" />
                                                     </StackPanel>
                                                 </suki:GlassCard>
-                                                <Grid RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="Auto,*"
+                                                <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto" ColumnDefinitions="Auto,*"
                                                       ColumnSpacing="12" RowSpacing="10">
                                                     <TextBlock Text="显示器" VerticalAlignment="Center" />
                                                     <ComboBox x:Name="SubScreenComboBox" Grid.Column="1" />
@@ -828,8 +855,20 @@
                                                     <ComboBox x:Name="SubResolutionComboBox" Grid.Row="2"
                                                               Grid.Column="1" />
                                                     <TextBlock Grid.Row="3" Text="刷新率" VerticalAlignment="Center" />
-                                                    <ComboBox x:Name="SubRefreshRateComboBox" Grid.Row="3"
-                                                              Grid.Column="1" />
+                                                    <Grid Grid.Row="3" Grid.Column="1" ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                                                        <Grid>
+                                                            <ComboBox x:Name="SubRefreshRateComboBox" />
+                                                            <TextBox x:Name="SubCustomRefreshRateTextBox" Classes="ComboBoxAligned" IsVisible="False"
+                                                                     Watermark="整数，≥60 Hz" />
+                                                        </Grid>
+                                                        <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                                            <TextBlock Text="自定义" VerticalAlignment="Center" />
+                                                            <ToggleSwitch x:Name="SubCustomRefreshRateToggleSwitch" IsChecked="False" />
+                                                        </StackPanel>
+                                                    </Grid>
+                                                    <TextBlock x:Name="SubCustomRefreshRateWarning" Grid.Row="4" Grid.ColumnSpan="2"
+                                                               Text="请确保输入的自定义刷新率被显示器支持，否则会启动失败"
+                                                               IsVisible="False" TextWrapping="Wrap" FontSize="12" Opacity="0.7" />
                                                 </Grid>
                                                 <suki:GlassCard>
                                                     <StackPanel Margin="12" Spacing="6">

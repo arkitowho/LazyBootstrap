@@ -11,6 +11,51 @@ internal static class DisplayWorkflowRegression
     public static int RunAll()
     {
         int failed = 0;
+        foreach (int? refreshRate in new int?[] { null, 120 })
+        {
+            Check($"显示事务按模式指定刷新率并完整恢复：{refreshRate?.ToString() ?? "游戏配置"}", async () =>
+            {
+                var service = new RecordingDisplayService();
+                var transaction = new DisplaySettingsTransactionCoordinator(service);
+                var result = transaction.Apply(new[] { new DisplaySettingsRequest("主屏", "DISPLAY1", 90, 720, 1280, refreshRate) });
+                Assert(result.Succeeded && result.RestoreStates.Count == 1, "应用失败或未保留快照");
+                Assert(service.Calls.Count == 2 && service.Calls[0].Flags == 2 && service.Calls[1].Flags == 1, "没有先校验再应用");
+                foreach (var call in service.Calls)
+                {
+                    Assert(((call.Fields & 0x00400000) != 0) == refreshRate.HasValue, "系统刷新率字段与模式不匹配");
+                    Assert((call.Fields & 0x00180080) == 0x00180080 && call.Width == 720 && call.Height == 1280 && call.Orientation == 1,
+                        "旋转或分辨率未正常应用");
+                    Assert(call.Frequency == (refreshRate ?? 60), "刷新率值错误");
+                }
+                Assert(service.RefreshRate == (refreshRate ?? 60), "默认模式更改了系统刷新率");
+                var restored = transaction.Restore(result.RestoreStates);
+                Assert(restored.Succeeded && service.Width == 1920 && service.Height == 1080 && service.Orientation == 0 && service.RefreshRate == 60,
+                    "未还原完整原始显示状态");
+                Assert((service.Calls[^1].Fields & 0x00400000) != 0, "恢复未包含原始刷新率");
+                await Task.CompletedTask;
+            }, ref failed);
+        }
+        Check("可选刷新率仍拒绝无效参数，失败校验不应用", async () =>
+        {
+            var service = new RecordingDisplayService();
+            Assert(!service.ApplyDisplaySettings("DISPLAY1", 0, 1920, 1080, 0).Succeeded, "接受零刷新率");
+            Assert(!service.ApplyDisplaySettings("DISPLAY1", 0, 1920, 1080, -1).Succeeded, "接受负刷新率");
+            Assert(!service.ApplyDisplaySettings("DISPLAY1", 0, 0, 1080, null).Succeeded, "接受无效分辨率");
+            Assert(service.Calls.Count == 0, "无效参数调用了原生接口");
+            service.FailValidation = true;
+            var result = new DisplaySettingsTransactionCoordinator(service).Apply(new[] { new DisplaySettingsRequest("主屏", "DISPLAY1", 0, 1280, 720, null) });
+            Assert(!result.Succeeded && service.Calls.Count == 1 && service.Width == 1920, "校验失败仍应用了设置");
+            await Task.CompletedTask;
+        }, ref failed);
+        Check("退出还原保留低于候选下限的原始刷新率", async () =>
+        {
+            var service = new RecordingDisplayService { RefreshRate = 59 };
+            var transaction = new DisplaySettingsTransactionCoordinator(service);
+            var applied = transaction.Apply(Requests(120));
+            Assert(applied.Succeeded && transaction.Restore(applied.RestoreStates).Succeeded && service.RefreshRate == 59,
+                "原始 59 Hz 状态未完整还原");
+            await Task.CompletedTask;
+        }, ref failed);
         Check("部分检测允许使用正常目标，但不以其他输出替代缺失目标", async () =>
         {
             var main = new DisplayInfo { PersistentId = "main", DeviceName = "DISPLAY1" };
@@ -52,9 +97,10 @@ internal static class DisplayWorkflowRegression
             await ExpectCanceled(waiting);
         }, ref failed);
 
+        foreach (int? refreshRate in new int?[] { null, 60 })
         foreach (bool exitRestore in new[] { false, true })
         {
-            Check($"原生应用期间停止必须等待还原，退出还原={exitRestore}", async () =>
+            Check($"原生应用期间停止必须等待还原，退出还原={exitRestore}，系统刷新率={refreshRate?.ToString() ?? "不指定"}", async () =>
             {
                 using var service = new ControlledDisplayService();
                 using var cancellation = new CancellationTokenSource();
@@ -64,7 +110,7 @@ internal static class DisplayWorkflowRegression
                 int cleanupCalls = 0;
                 var workflow = lifetime.RunAsync(async () =>
                 {
-                    result = await Task.Run(() => transaction.Apply(Requests(), cancellation.Token));
+                    result = await Task.Run(() => transaction.Apply(Requests(refreshRate), cancellation.Token));
                     // Normal-exit preference deliberately differs from the unconditional canceled-transaction rollback.
                     if (exitRestore && result.Succeeded) transaction.Restore(result.RestoreStates);
                 });
@@ -85,7 +131,7 @@ internal static class DisplayWorkflowRegression
                 service.Release.Set();
                 await stopping;
                 await workflow;
-                Assert(!result.Succeeded && result.RestoreStates.Count == 0 && cleanupCalls == 1 && !lifetime.IsBusy, "停止清理状态错误");
+                Assert(!result.Succeeded && result.Cancelled && result.RestoreStates.Count == 0 && cleanupCalls == 1 && !lifetime.IsBusy, "停止清理状态错误或取消标记丢失");
             }, ref failed);
         }
 
@@ -99,7 +145,7 @@ internal static class DisplayWorkflowRegression
             cancellation.Cancel();
             service.Release.Set();
             var result = await apply;
-            Assert(result.RestoreStates.Count == 1 && result.Messages.Count > 0 && service.Width == 1280, "还原失败丢失快照或诊断");
+            Assert(result.Cancelled && result.RestoreStates.Count == 1 && result.Messages.Count > 0 && service.Width == 1280, "还原失败丢失快照、取消标记或诊断");
             var failedRestore = transaction.Restore(result.RestoreStates);
             Assert(!failedRestore.Succeeded && failedRestore.RestoreStates.Count == 1, "重试失败却清空快照");
             service.FailRestore = false;
@@ -137,7 +183,7 @@ internal static class DisplayWorkflowRegression
                 {
                     store.WriteSection("Display", new Dictionary<string, string>
                     {
-                        ["displayconfigure"] = "true", ["maindisplayid"] = "monitor",
+                        ["displayconfigure"] = "true", ["compatibilitymode"] = "true", ["maindisplayid"] = "monitor",
                         ["mainresolution"] = "1920x1080", ["mainrefresh"] = "120"
                     });
                     writes++;
@@ -173,7 +219,32 @@ internal static class DisplayWorkflowRegression
         return failed;
     }
 
-    private static DisplaySettingsRequest[] Requests() => new[] { new DisplaySettingsRequest("主屏", "DISPLAY1", 0, 1280, 720, 60) };
+    private static DisplaySettingsRequest[] Requests(int? refreshRate = 60) => new[] { new DisplaySettingsRequest("主屏", "DISPLAY1", 0, 1280, 720, refreshRate) };
+
+    private sealed class RecordingDisplayService : WindowsDisplayConfigurationService
+    {
+        public readonly List<(int Flags, int Fields, int Frequency, int Width, int Height, int Orientation)> Calls = new();
+        public int Width = 1920, Height = 1080, Orientation, RefreshRate = 60;
+        public bool FailValidation;
+        protected override bool TryEnumDisplaySettings(string deviceName, int modeIndex, ref DevMode mode)
+        {
+            mode.PelsWidth = Width;
+            mode.PelsHeight = Height;
+            mode.DisplayOrientation = Orientation;
+            mode.DisplayFrequency = RefreshRate;
+            return true;
+        }
+        protected override int TryChangeDisplaySettings(string deviceName, ref DevMode mode, int flags)
+        {
+            Calls.Add((flags, mode.Fields, mode.DisplayFrequency, mode.PelsWidth, mode.PelsHeight, mode.DisplayOrientation));
+            if (flags == 2) return FailValidation ? -1 : 0;
+            Width = mode.PelsWidth;
+            Height = mode.PelsHeight;
+            Orientation = mode.DisplayOrientation;
+            if ((mode.Fields & 0x00400000) != 0) RefreshRate = mode.DisplayFrequency;
+            return 0;
+        }
+    }
 
     private sealed class ControlledDisplayService : WindowsDisplayConfigurationService, IDisposable
     {

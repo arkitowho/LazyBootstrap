@@ -15,6 +15,8 @@ import unittest
 from unittest import mock
 import zipfile
 
+from update_file_stat_helpers import directory_size_changes
+
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "Tools/Update-Package-Tool"))
 from manifest import Options, Rule, checksums, make_manifest, package_name, rule_operation, validate_version
@@ -71,6 +73,17 @@ class PackageTests(unittest.TestCase):
         self.assertEqual(paths, {p.relative_to(result).as_posix() for p in result.rglob("*") if p.is_file()} - {"checksums"})
         for entry in document["files"]:
             self.assertEqual(entry["sha256"], hashlib.sha256((result / entry["path"]).read_bytes()).hexdigest())
+
+    def test_directory_size_changes_allow_preview_and_create(self):
+        with directory_size_changes():
+            result = self.generate()
+            self.assertEqual((result / "source/contents/data/中文.txt").read_text(encoding="utf-8"), "新内容")
+            self.assertTrue((result / "source/contents/modules/空目录").is_dir())
+            self.assertEqual((self.original / "data/中文.txt").read_text(encoding="utf-8"), "新内容")
+            document = json.loads((result / "checksums").read_bytes())
+            for entry in document["files"]:
+                self.assertEqual(entry["sha256"], hashlib.sha256((result / entry["path"]).read_bytes()).hexdigest())
+            self.assertFalse(list(self.output.glob(".update-package-*")))
 
     def test_wrapped_layout_and_ambiguous_roots(self):
         wrapper = self.root / "wrapper"
@@ -411,19 +424,41 @@ class XmlRuleTests(unittest.TestCase):
 @unittest.skipUnless(os.name == "nt" and shutil.which("pwsh"), "需要 Windows 和 pwsh")
 class CompilerTests(unittest.TestCase):
     def test_script_failure_and_output(self):
-        with tempfile.TemporaryDirectory() as temporary:
+        with tempfile.TemporaryDirectory(prefix="compiler 中文 & ' ") as temporary:
             root = Path(temporary)
-            (root / "build.ps1").write_text("Write-Output 'compiler-test'; exit 17", encoding="utf-8")
+            (root / "build.bat").write_text("@echo off\nchcp 65001 >nul\necho 编译测试 compiler-test\nexit /b 17\n",
+                                           encoding="utf-8", newline="\r\n")
             messages = []
             with mock.patch.object(launcher_build, "REPO_ROOT", root):
                 with self.assertRaisesRegex(ValueError, "17"):
                     launcher_build.compile_launcher(messages.append)
             self.assertTrue(any("compiler-test" in message for message in messages))
+            self.assertTrue(any("编译测试" in message for message in messages))
+
+    def test_successful_batch_with_pause(self):
+        with tempfile.TemporaryDirectory(prefix="compiler 中文 & ' ") as temporary:
+            root = Path(temporary)
+            (root / "build.bat").write_text("@echo off\necho compiler-test\npause\nexit /b 0\n",
+                                           encoding="utf-8", newline="\r\n")
+            messages = []
+            with mock.patch.object(launcher_build, "REPO_ROOT", root):
+                launcher_build.compile_launcher(messages.append)
+            self.assertTrue(any("compiler-test" in message for message in messages))
+            self.assertEqual(messages[-1], "启动器编译完成，正在检查 build 目录。")
+
+    def test_missing_batch_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with mock.patch.object(launcher_build, "REPO_ROOT", root):
+                with self.assertRaisesRegex(ValueError, "build.bat"):
+                    launcher_build.compile_launcher()
 
     def test_cancel_running_compiler(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            (root / "build.ps1").write_text("Write-Output 'ready'; Start-Sleep -Seconds 60", encoding="utf-8")
+            (root / "build.bat").write_text(
+                '@echo off\necho ready\n"' + sys.executable + '" -c "import time; time.sleep(60)"\n',
+                encoding="utf-8", newline="\r\n")
             ready = False
             def progress(message):
                 nonlocal ready

@@ -63,7 +63,9 @@ def scan(root: Path, *, cancel=None) -> list[Path]:
 
 def fingerprint(path: Path) -> tuple:
     info = reject_link(path)
-    return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns
+    # 目录枚举可能改变文件系统返回的目录大小，不能据此判断内容变化。
+    size = 0 if stat.S_ISDIR(info.st_mode) else info.st_size
+    return info.st_dev, info.st_ino, size, info.st_mtime_ns, info.st_ctime_ns
 
 
 def generate(directory: str, *, progress=None, cancel=None) -> Path:

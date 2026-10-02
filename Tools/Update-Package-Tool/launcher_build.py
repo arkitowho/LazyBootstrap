@@ -15,12 +15,15 @@ def compile_launcher(progress=lambda message: None, cancel=lambda: None):
     executable = shutil.which("pwsh")
     if executable is None:
         raise ValueError("未找到 pwsh，请安装 PowerShell 7 并加入 PATH。")
-    script = REPO_ROOT / "build.ps1"
+    script = REPO_ROOT / "build.bat"
     if not script.is_file():
-        raise ValueError("未找到仓库根目录的 build.ps1。")
-    progress("正在执行 build.ps1，编译启动器、主程序和更新器……")
+        raise ValueError("未找到仓库根目录的 build.bat。")
+    progress("正在执行 build.bat，编译启动器、主程序和更新器……")
+    # 使用 PowerShell 字符串字面量保护路径，并保留批处理脚本的退出码。
+    script_literal = "'" + str(script).replace("'", "''") + "'"
+    command = "& " + script_literal + "; exit $LASTEXITCODE"
     messages = queue.Queue()
-    with subprocess.Popen([executable, "-NoProfile", "-NonInteractive", "-File", str(script)],
+    with subprocess.Popen([executable, "-NoProfile", "-NonInteractive", "-Command", command],
                           cwd=REPO_ROOT, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                           stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)) as process:
@@ -46,7 +49,7 @@ def compile_launcher(progress=lambda message: None, cancel=lambda: None):
                 elif message:
                     progress("编译输出：" + message)
             if process.wait() != 0:
-                raise ValueError(f"build.ps1 编译失败（退出代码 {process.returncode}），未生成更新包。")
+                raise ValueError(f"build.bat 编译失败（退出代码 {process.returncode}），未生成更新包。")
             cancel()
         finally:
             if process.poll() is None:

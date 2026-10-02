@@ -34,7 +34,6 @@ namespace LazyBootstrap.UI
         {
             _logger.LogInformation("KFC update workflow requested.");
 
-            string sevenZipExecutablePath = _paths.ResolveSevenZipExecutablePath();
             string mediaUpdaterExecutablePath = Path.Combine(_paths.ApplicationDirectoryPath, MediaUpdateProtocol.MediaUpdaterExecutableFileName);
             string archivePath = await PickFileAsync("选择更新压缩包", UpdateArchiveFilePatterns).ConfigureAwait(true);
             if (string.IsNullOrWhiteSpace(archivePath) || !File.Exists(archivePath))
@@ -57,6 +56,8 @@ namespace LazyBootstrap.UI
                 return;
             }
 
+            if (!TryResolveSevenZip("更新失败", out string sevenZipExecutablePath)) return;
+
             _logger.LogInformation("KFC update archive selected: {ArchivePath}", archivePath);
 
             string stagingDirectoryPath = _paths.GetUpdateStagingDirectoryPath();
@@ -69,9 +70,19 @@ namespace LazyBootstrap.UI
                 ClearStagingDirectory(stagingDirectoryPath);
                 reportProgress?.Invoke("正在解压更新压缩包...");
                 if (!await RunSevenZipExtractAsync(sevenZipExecutablePath, archivePath, stagingDirectoryPath).ConfigureAwait(true)) return;
-                string packageDirectory = await Task.Run(() => MediaUpdateChecksums.Verify(_paths.BaseDir, stagingDirectoryPath,
-                    message => Avalonia.Threading.Dispatcher.UIThread.Post(() => reportProgress?.Invoke(message)),
-                    log: message => _logger.LogInformation("{UpdateVerification}", message)));
+                string packageDirectory;
+                try
+                {
+                    packageDirectory = await Task.Run(() => MediaUpdateChecksums.Verify(_paths.BaseDir, stagingDirectoryPath,
+                        message => Avalonia.Threading.Dispatcher.UIThread.Post(() => reportProgress?.Invoke(message)),
+                        log: message => _logger.LogInformation("{UpdateVerification}", message)));
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Update package verification failed.");
+                    ShowErrorToast("更新包校验失败", "更新包无效、损坏或无法读取，已停止更新。请检查文件权限或重新获取完整更新包。详情请查看日志。");
+                    return;
+                }
                 reportProgress?.Invoke("正在启动更新程序...");
                 var updaterStartResult = TryStartMediaUpdater(
                     mediaUpdaterExecutablePath,
@@ -84,15 +95,14 @@ namespace LazyBootstrap.UI
                 {
                     if (updaterStartResult == MediaUpdaterStartResult.CancelledByUser)
                     {
-                        _logger.LogWarning("KFC update cancelled because MediaUpdater elevation was cancelled.");
-                        ShowWarningToast("更新已取消", updaterStartError);
+                        _logger.LogInformation("KFC update cancelled because MediaUpdater elevation was cancelled.");
                     }
                     else
                     {
                         _logger.LogWarning("KFC update failed because MediaUpdater could not be started. Error={Error}", updaterStartError);
                         ShowErrorToast(
                             "更新失败",
-                            string.IsNullOrWhiteSpace(updaterStartError) ? "无法启动 MediaUpdater。" : updaterStartError);
+                            "无法启动更新器，请检查程序文件是否完整及运行权限后重试。详情请查看日志。");
                     }
 
                     return;
@@ -107,7 +117,7 @@ namespace LazyBootstrap.UI
             catch (Exception ex)
             {
                 _logger.LogError(ex, "KFC update workflow failed.");
-                ShowErrorToast("更新失败", ex.Message);
+                ShowErrorToast("更新失败", "无法准备更新，请检查更新文件及临时目录写入权限后重试。详情请查看日志。");
             }
             if (mediaUpdaterStarted)
             {
@@ -158,7 +168,7 @@ namespace LazyBootstrap.UI
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to create update extraction directory.");
-                ShowErrorToast("更新失败", $"无法创建临时目录: {ex.Message}");
+                ShowErrorToast("更新失败", "无法创建更新临时目录，请检查目录写入权限后重试。详情请查看日志。");
                 return false;
             }
 
@@ -186,20 +196,19 @@ namespace LazyBootstrap.UI
                 if (exitCode == -1)
                 {
                     _logger.LogWarning("Update extraction failed because 7za process start returned false.");
-                    ShowErrorToast("更新失败", "无法启动 7za。");
+                    ShowUpdateExtractionStartError();
                     return false;
                 }
             }
             catch (Win32Exception ex) when (ex.NativeErrorCode == 1223)
             {
-                _logger.LogWarning("Update extraction cancelled at UAC prompt.");
-                ShowWarningToast("解压已取消", "用户取消了 7za 管理员授权。");
+                _logger.LogInformation("Update extraction cancelled at UAC prompt.");
                 return false;
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to start update extraction process.");
-                ShowErrorToast("更新失败", $"无法启动 7za: {ex.Message}");
+                ShowUpdateExtractionStartError();
                 return false;
             }
 
@@ -207,12 +216,15 @@ namespace LazyBootstrap.UI
             if (exitCode != 0)
             {
                 _logger.LogWarning("7za exited with code {Code}.", exitCode);
-                ShowErrorToast("解压失败", $"7za 退出代码: {exitCode}");
+                ShowErrorToast("解压失败", "无法解压更新包，请检查压缩包是否完整及临时目录写入权限后重试。详情请查看日志。");
                 return false;
             }
 
             return true;
         }
+
+        private void ShowUpdateExtractionStartError() =>
+            ShowErrorToast("更新失败", "无法启动解压工具，请检查程序文件是否完整及运行权限后重试。详情请查看日志。");
 
         private static MediaUpdaterStartResult TryStartMediaUpdater(
             string mediaUpdaterPath,

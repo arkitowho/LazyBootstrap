@@ -3,6 +3,7 @@ using SystemEnvironment = System.Environment;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -104,15 +105,20 @@ namespace LazyBootstrap.UI
 
         private async Task StopAndKillProcessesAsync()
         {
+            if (_launchWorkflowLifetime.IsStopping) return;
             try
             {
+                ManualStopResult stopResult = null;
                 await _launchWorkflowLifetime.StopAsync(() =>
                 {
                     CancelLaunchWorkflow();
                     _displayTransactionCancellation?.Cancel();
                     if (_displayTransactionActive) _dialogManager.DismissDialog();
                     NotifyLaunchStateChanged(_launchUiState);
-                }, CompleteManualStopAsync);
+                }, async () => { stopResult = await CompleteManualStopAsync(); });
+                if (stopResult == null) return;
+                if (stopResult.Succeeded) ShowInfoToast("停止完成", stopResult.Message);
+                else ShowWarningToast("停止未完成", stopResult.Message);
             }
             catch (Exception ex)
             {
@@ -122,7 +128,7 @@ namespace LazyBootstrap.UI
             finally { NotifyLaunchStateChanged(_launchUiState); }
         }
 
-        private async Task CompleteManualStopAsync()
+        private async Task<ManualStopResult> CompleteManualStopAsync()
         {
             if (_displayTransactionCompletion != null) await _displayTransactionCompletion.Task;
             _logger.LogInformation("Manual launch stop and process termination requested.");
@@ -133,8 +139,8 @@ namespace LazyBootstrap.UI
 
             AppendLaunchOutput(_launchUiState, "正在停止启动流程并结束所有进程...", NotificationType.Warning);
 
-            int killedSpice = KillProcessesByName("spice64");
-            int killedAsphyxia = KillProcessesByName("asphyxia-core-x64");
+            var spiceResult = KillProcessesByName("spice64");
+            var asphyxiaResult = KillProcessesByName("asphyxia-core-x64");
 
             DisposeTrackedGameProcess();
             _gameProcessTracker.ResetManagedAsphyxiaTracking();
@@ -145,13 +151,10 @@ namespace LazyBootstrap.UI
 
             _logger.LogInformation(
                 "Manual launch stop and process termination completed. SpiceKilled={SpiceKilled}, AsphyxiaKilled={AsphyxiaKilled}, DisplayRestored={DisplayRestored}",
-                killedSpice,
-                killedAsphyxia,
+                spiceResult.TerminatedCount,
+                asphyxiaResult.TerminatedCount,
                 restored);
-            if (_displayRestoreStates.Count > 0)
-                ShowWarningToast("显示器还原未完成", $"进程已停止，仍有 {_displayRestoreStates.Count} 个显示器未还原；可再次点击停止重试。");
-            else
-                ShowInfoToast("操作完成", $"停止完成：spice64 {killedSpice} 个，asphyxia-core-x64 {killedAsphyxia} 个，显示器恢复 {restored} 个");
+            return new ManualStopResult([spiceResult, asphyxiaResult], _displayRestoreStates.Count);
         }
 
         private async Task RunLaunchWorkflowAsync(LaunchUiState launchState, LaunchRequest request)
@@ -424,7 +427,7 @@ namespace LazyBootstrap.UI
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Game launch workflow failed.");
-                FailLaunch(launchState, ex.Message);
+                FailLaunch(launchState, ex.Message, "无法启动游戏，请检查程序文件和运行权限后重试。详情请查看日志。");
             }
             finally
             {
@@ -438,7 +441,7 @@ namespace LazyBootstrap.UI
                     else
                     {
                         _logger.LogWarning("Failed to stop managed Asphyxia Core process after launch abort.");
-                        ShowWarningToast("Asphyxia 关闭提示", stopErrorMessage);
+                        ShowAsphyxiaStopError(stopErrorMessage);
                     }
                 }
 
@@ -829,7 +832,7 @@ namespace LazyBootstrap.UI
                     else
                     {
                         _logger.LogWarning("Failed to stop managed Asphyxia Core process after game exit.");
-                        ShowWarningToast("Asphyxia 关闭提示", stopErrorMessage);
+                        ShowAsphyxiaStopError(stopErrorMessage);
                     }
                 }
 
@@ -1064,9 +1067,10 @@ namespace LazyBootstrap.UI
             return $"[{DateTime.Now:HH:mm:ss}] {prefix}{line}";
         }
 
-        private int KillProcessesByName(string processName)
+        private ProcessTerminationResult KillProcessesByName(string processName)
         {
             int count = 0;
+            bool permissionDenied = false;
             Process[] processes;
             try
             {
@@ -1076,22 +1080,20 @@ namespace LazyBootstrap.UI
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to enumerate processes for termination. ProcessName={ProcessName}", processName);
-                ShowErrorToast("结束进程失败", $"获取进程列表 {processName} 时出错：{ex.Message}");
-                return 0;
+                return new ProcessTerminationResult(processName, count, false);
             }
 
             foreach (var process in processes)
             {
                 try
                 {
+                    if (process.HasExited) continue;
                     int pid = process.Id;
                     _logger.LogInformation("Killing process. ProcessName={ProcessName}, ProcessId={ProcessId}", processName, pid);
                     process.Kill();
-
                     if (!process.WaitForExit(3000))
                     {
                         _logger.LogWarning("Process did not exit after Kill. Falling back to taskkill. ProcessName={ProcessName}, ProcessId={ProcessId}", processName, pid);
-                        ShowWarningToast("进程未响应", $"{processName}.exe (PID: {pid}) 未响应，正在尝试强制终止。");
                         using var taskKillProcess = Process.Start(new ProcessStartInfo
                         {
                             FileName = "taskkill",
@@ -1103,38 +1105,47 @@ namespace LazyBootstrap.UI
                         });
                         taskKillProcess?.WaitForExit(2000);
                     }
-
                     process.Refresh();
                     if (!process.HasExited)
                     {
                         _logger.LogWarning("Process is still running after termination attempt. ProcessName={ProcessName}, ProcessId={ProcessId}", processName, pid);
-                        ShowWarningToast("结束进程未完成", $"{processName}.exe (PID: {pid}) 仍在运行。");
                         continue;
                     }
-
-                    _logger.LogInformation("Process terminated. ProcessName={ProcessName}, ProcessId={ProcessId}", processName, pid);
                     count++;
                 }
-                catch (InvalidOperationException)
+                catch (InvalidOperationException ex)
                 {
+                    _logger.LogDebug(ex, "Process may have exited during termination. ProcessName={ProcessName}", processName);
                 }
                 catch (System.ComponentModel.Win32Exception ex)
                 {
-                    _logger.LogWarning(ex, "Permission denied while terminating process. ProcessName={ProcessName}", processName);
-                    ShowErrorToast("结束进程权限不足", ex.Message);
+                    permissionDenied |= ex.NativeErrorCode == 5;
+                    _logger.LogWarning(ex, "Failed to terminate process. ProcessName={ProcessName}", processName);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Failed to terminate process. ProcessName={ProcessName}", processName);
-                    ShowErrorToast("结束进程失败", ex.Message);
                 }
-                finally
-                {
-                    process.Dispose();
-                }
+                finally { process.Dispose(); }
             }
 
-            return count;
+            // Confirm the final state, including processes that appeared during cleanup.
+            try
+            {
+                var remaining = Process.GetProcessesByName(processName);
+                try
+                {
+                    bool succeeded = remaining.All(process => process.HasExited);
+                    _logger.LogInformation("Process termination verification completed. ProcessName={ProcessName}, Succeeded={Succeeded}", processName, succeeded);
+                    return new ProcessTerminationResult(processName, count, succeeded, permissionDenied);
+                }
+                finally { foreach (var process in remaining) process.Dispose(); }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not verify process termination. ProcessName={ProcessName}", processName);
+                return new ProcessTerminationResult(processName, count, false, permissionDenied);
+            }
         }
 
         private bool IsAsphyxiaCoreRunning(out int processCount)

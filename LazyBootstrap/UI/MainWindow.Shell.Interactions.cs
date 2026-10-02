@@ -7,9 +7,11 @@ using Avalonia.Media.Imaging;
 using Avalonia.Platform;
 using Avalonia.Platform.Storage;
 using Avalonia.Threading;
+using Microsoft.Extensions.Logging;
 using SukiUI.Dialogs;
 using SukiUI.Toasts;
 using LazyBootstrap.FileSystem;
+using LazyBootstrap.Platform;
 
 namespace LazyBootstrap.UI
 {
@@ -32,6 +34,41 @@ namespace LazyBootstrap.UI
         private void ShowErrorToast(string title, string content)
         {
             CreateToast(title, content, NotificationType.Error, 4);
+        }
+
+        private void ShowSettingsSaveError(string title = "保存设置失败") =>
+            ShowErrorToast(title, "请检查配置文件是否被占用及写入权限后重试。详情请查看日志。");
+
+        private void ShowSystemSettingsError(string title) =>
+            ShowErrorToast(title, "请检查系统权限后重试。详情请查看日志。");
+
+        private void OpenWebsite(string url, string failureTitle)
+        {
+            try
+            {
+                ProcessExecutionHelper.StartShellProcess(url, _paths.ApplicationDirectoryPath, false)?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to open website in the default browser. Url={Url}", url);
+                ShowErrorToast(failureTitle, "请检查系统默认浏览器设置后重试。");
+            }
+        }
+
+        private void ShowConfigWriteError() =>
+            ShowErrorToast("写入配置失败", "请检查 spice2x 配置文件是否有效、是否被占用及写入权限后重试。详情请查看日志。");
+
+        private void ShowCompatibilityError() =>
+            ShowErrorToast("兼容层设置失败", "请检查兼容层文件是否完整、游戏是否已关闭及写入权限后重试。详情请查看日志。");
+
+        private void ShowDisplayConfigurationError() =>
+            ShowErrorToast("显示器配置失败", "请检查显示器连接和配置文件写入权限后重新检测。详情请查看日志。");
+
+        private void ShowAsphyxiaStopError(string error)
+        {
+            _logger.LogWarning("Managed Asphyxia shutdown failed: {Error}", error);
+            if (_launchWorkflowLifetime.IsStopping) return;
+            ShowWarningToast("Asphyxia 未关闭", "请点击停止重试，或在任务管理器中结束 Asphyxia 进程。详情请查看日志。");
         }
 
         private Task<bool> ShowDialogAsync(

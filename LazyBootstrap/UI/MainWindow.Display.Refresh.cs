@@ -175,7 +175,8 @@ namespace LazyBootstrap.UI
                 !_displayState.IsDisplayConfigurationEnabled || generation != _displayInitialization.Generation || _isWindowCloseAnimationRunning)
                 return DisplayRefreshOutcome.Canceled;
             ApplyDisplayStateToUi();
-            bool targetsReady = DisplayCatalog.ResolveFresh(result, _displayState.SelectedMainDisplay?.Display)?.IsAvailable == true &&
+            bool targetsReady = result.Status == DisplayDiscoveryStatus.Complete &&
+                DisplayCatalog.ResolveFresh(result, _displayState.SelectedMainDisplay?.Display)?.IsAvailable == true &&
                 (!_displayState.IsDualDisplay || DisplayCatalog.ResolveFresh(result, _displayState.SelectedSubDisplay?.Display)?.IsAvailable == true);
             _displayInitialization.TrySave(generation, outcome, targetsReady, () => PersistSelectionState(_displayState));
             return result.Status == DisplayDiscoveryStatus.Failed ? DisplayRefreshOutcome.Failed : outcome;
@@ -184,6 +185,7 @@ namespace LazyBootstrap.UI
         private void UpdateDisplayDiscoveryStatus()
         {
             if (_displayRefreshCoordinator.IsDisposed) return;
+            ToolTip.SetTip(DisplayDiscoveryStatusText, null);
             if (!_displayState.IsDisplayConfigurationEnabled)
             {
                 DisplayDiscoveryStatusText.Text = "显示器配置未启用，不进行检测。";
@@ -208,7 +210,8 @@ namespace LazyBootstrap.UI
             DisplayDiscoveryStatusText.Text = string.IsNullOrWhiteSpace(_displayCatalog.StatusMessage)
                 ? $"已检测到 {_displayCatalog.Displays.Count} 个显示输出"
                 : "检测暂不完整，已保留原列表；可点击重新检测。";
-            ToolTip.SetTip(DisplayDiscoveryStatusText, _displayCatalog.StatusMessage);
+            if (!string.IsNullOrWhiteSpace(_displayCatalog.StatusMessage))
+                ToolTip.SetTip(DisplayDiscoveryStatusText, "部分显示输出未能读取，请检查连接后重新检测。详情请查看日志。");
         }
 
         private void ApplyDiscoveredDisplays(DisplayDiscoveryResult result)

@@ -12,6 +12,8 @@ import time
 import unittest
 from unittest import mock
 
+from update_file_stat_helpers import directory_size_changes
+
 TOOL = Path(__file__).resolve().parents[1] / "Tools/Update-Package-Tool"
 sys.path.insert(0, str(TOOL))
 from manifest import Options, Rule, checksums
@@ -83,6 +85,63 @@ class PackageImportTests(unittest.TestCase):
         self.write_manifest()
         (self.package / "说明.txt").write_bytes(b'tampered')
         self.assertTrue(any("SHA-256" in error for error in self.session().integrity_issues))
+
+    def test_directory_size_changes_allow_import_preview_save_and_overwrite(self):
+        original = {path.relative_to(self.package): path.read_bytes()
+                    for path in self.package.rglob("*") if path.is_file()}
+        with directory_size_changes():
+            session = self.session()
+            saved = save_import(self.plan(session))
+            self.assertEqual(import_package(saved).integrity_issues, [])
+            for relative, data in original.items():
+                self.assertEqual((self.package / relative).read_bytes(), data)
+            self.assertTrue((saved / "source/content/空目录").is_dir())
+
+            session = self.session()
+            plan = prepare_import(session, Options(), overwrite=True)
+            save_import(plan)
+            self.assertEqual(self.session().integrity_issues, [])
+            for relative, data in original.items():
+                self.assertEqual((plan.backup / relative).read_bytes(), data)
+            self.assertFalse(list(self.root.glob(".update-package-*")))
+
+    def test_same_size_content_change_with_unchanged_timestamps_rejected(self):
+        plan = prepare_import(self.session(), Options(), overwrite=True)
+        changed = self.package / "说明.txt"
+        info = changed.stat()
+        original = changed.read_bytes()
+        changed.write_bytes(bytes([original[0] ^ 0xff]) + original[1:])
+        os.utime(changed, ns=(info.st_atime_ns, info.st_mtime_ns))
+        if os.name == "nt":
+            self.assertEqual(checksums.fingerprint(changed), plan.session.snapshot["说明.txt"].stamp)
+        manifest = (self.package / "update").read_bytes()
+        with self.assertRaisesRegex(ValueError, "外部修改"):
+            save_import(plan)
+        self.assertEqual((self.package / "update").read_bytes(), manifest)
+        self.assertFalse(plan.backup.exists())
+        self.assertFalse(list(self.root.glob(".update-package-*")))
+
+    def test_external_directory_addition_and_removal_rejected(self):
+        for adding in (True, False):
+            with self.subTest(adding=adding):
+                plan = prepare_import(self.session(), Options(), overwrite=True)
+                manifest = (self.package / "update").read_bytes()
+                directory = self.package / "source/content" / ("外部新增" if adding else "空目录")
+                if adding:
+                    directory.mkdir()
+                else:
+                    directory.rmdir()
+                try:
+                    with self.assertRaisesRegex(ValueError, "外部修改"):
+                        save_import(plan)
+                    self.assertEqual((self.package / "update").read_bytes(), manifest)
+                    self.assertFalse(plan.backup.exists())
+                    self.assertFalse(list(self.root.glob(".update-package-*")))
+                finally:
+                    if adding:
+                        directory.rmdir()
+                    else:
+                        directory.mkdir()
 
     def test_missing_payload_repair_shared_references_toggle_and_order(self):
         self.operations += [deepcopy(COPY)]
@@ -303,7 +362,111 @@ class PackageImportTests(unittest.TestCase):
             self.assertTrue(any(op["target"] == "launcher" and op["type"] == "mirror" for op in operations))
             self.assertTrue(any(op["target"] == "启动.exe" for op in operations))
             saved = save_import(plan)
-            self.assertEqual((saved / plan.component_prefix / "launcher-build/启动.exe").read_bytes(), b'Launcher.exe')
+            self.assertEqual((saved / "source/启动.exe").read_bytes(), b'Launcher.exe')
+            self.assertEqual((saved / "source/launcher/LazyBootstrap.exe").read_bytes(), b'launcher/LazyBootstrap.exe')
+            self.assertEqual((saved / "source/说明.txt").read_bytes(), "说明.txt".encode())
+            self.assertFalse((saved / plan.component_prefix).exists())
+
+    def test_launcher_build_replaces_existing_payload_and_operations(self):
+        import launcher_build
+        for prefix in ("source/Launcher", "source/components-012345abcdef/launcher-build/launcher"):
+            with self.subTest(prefix=prefix):
+                old_launcher = self.package / prefix
+                old_launcher.mkdir(parents=True)
+                (old_launcher / "LazyBootstrap.exe").write_bytes(b'old-main')
+                (old_launcher / "MediaUpdater.exe").write_bytes(b'old-updater')
+                (old_launcher / "obsolete.dll").write_bytes(b'obsolete')
+                old_entry = old_launcher.parent / "启动.exe"
+                old_entry.write_bytes(b'old-entry')
+                self.operations = [deepcopy(COPY),
+                                   {"type": "copy", "source": prefix, "target": "launcher"},
+                                   {"type": "copy", "source": prefix + "/LazyBootstrap.exe", "target": "launcher/LazyBootstrap.exe"},
+                                   {"type": "copy", "source": old_entry.relative_to(self.package).as_posix(), "target": "启动.exe"},
+                                   {"type": "editXml", "target": "launcher/config.xml", "edits": [
+                                       {"action": "setValue", "xpath": "/r/@v", "value": "new"}]}]
+                self.write_manifest()
+                session = self.session()
+                original_entries = dict(session.entries)
+                repo = self.root / "repo"
+                (repo / "build/launcher").mkdir(parents=True, exist_ok=True)
+                (repo / "build/Launcher.exe").write_bytes(b'new-entry')
+                (repo / "build/launcher/LazyBootstrap.exe").write_bytes(b'new-main')
+                (repo / "build/launcher/MediaUpdater.exe").write_bytes(b'new-updater')
+                (repo / "build/launcher/config.xml").write_bytes(b'<r v="old"/>')
+                with mock.patch.object(launcher_build, "REPO_ROOT", repo), mock.patch.object(launcher_build, "compile_launcher"):
+                    options = Options(output=str(self.root), suffix="编译替换", build_launcher=True)
+                    plan = prepare_import(session, options)
+                    self.assertEqual(session.entries, original_entries)
+                    self.assertEqual((old_launcher / "LazyBootstrap.exe").read_bytes(), b'old-main')
+                    operations = plan.manifest["operations"]
+                    self.assertEqual(operations, [deepcopy(COPY),
+                                                 {"type": "mirror", "source": "source/launcher", "target": "launcher"},
+                                                 {"type": "copy", "source": "source/启动.exe", "target": "启动.exe"},
+                                                 self.operations[-1]])
+                    saved = save_import(plan)
+                    self.assertEqual((saved / "source/启动.exe").read_bytes(), b'new-entry')
+                    self.assertEqual((saved / "source/launcher/LazyBootstrap.exe").read_bytes(), b'new-main')
+                    self.assertFalse((saved / "source/launcher/obsolete.dll").exists())
+                    self.assertFalse((saved / "source/components-012345abcdef").exists())
+                    imported = import_package(saved)
+                    self.assertEqual(imported.integrity_issues, [])
+                    # 再次编译覆盖保存不应重复追加启动器操作。
+                    repeated = prepare_import(imported, Options(build_launcher=True), overwrite=True)
+                    self.assertEqual(repeated.manifest, plan.manifest)
+                    save_import(repeated)
+                    self.assertEqual(import_package(saved).integrity_issues, [])
+                    self.assertEqual((repeated.backup / "source/启动.exe").read_bytes(), b'new-entry')
+                shutil.rmtree(saved)
+                shutil.rmtree(repeated.backup)
+                shutil.rmtree(old_launcher)
+                old_entry.unlink()
+
+    def test_launcher_compile_failure_preserves_original_payload(self):
+        import launcher_build
+        source = self.package / "source/启动.exe"
+        source.write_bytes(b'old-entry')
+        self.write_manifest()
+        session = self.session()
+        entries = dict(session.entries)
+        with mock.patch.object(launcher_build, "compile_launcher", side_effect=ValueError("模拟编译失败")):
+            with self.assertRaisesRegex(ValueError, "编译失败"):
+                self.plan(session, build_launcher=True)
+        self.assertEqual(session.entries, entries)
+        self.assertEqual(source.read_bytes(), b'old-entry')
+        self.assertFalse(list(self.root.glob(".update-package-*")))
+
+    def test_launcher_build_preserves_shared_legacy_payload_and_other_components(self):
+        import launcher_build
+        prefix = "source/components-012345abcdef"
+        legacy = prefix + "/launcher-build"
+        original_main = self.package / legacy / "launcher/LazyBootstrap.exe"
+        original_main.parent.mkdir(parents=True)
+        original_main.write_bytes(b'archived-main')
+        (self.package / legacy / "启动.exe").write_bytes(b'old-entry')
+        spice = self.package / prefix / "spice/spice64.exe"
+        spice.parent.mkdir()
+        spice.write_bytes(b'spice')
+        self.operations += [
+            {"type": "mirror", "source": legacy + "/launcher", "target": "launcher"},
+            {"type": "copy", "source": legacy + "/启动.exe", "target": "启动.exe"},
+            {"type": "copy", "source": legacy + "/launcher/LazyBootstrap.exe", "target": "backups/main.exe"},
+            {"type": "copy", "source": prefix + "/spice/spice64.exe", "target": "contents/spice64.exe"},
+        ]
+        self.write_manifest()
+        repo = self.root / "repo"
+        (repo / "build/launcher").mkdir(parents=True)
+        for name in ("Launcher.exe", "launcher/LazyBootstrap.exe", "launcher/MediaUpdater.exe"):
+            (repo / "build" / name).write_bytes(b'compiled')
+        with mock.patch.object(launcher_build, "REPO_ROOT", repo), mock.patch.object(launcher_build, "compile_launcher"):
+            plan = self.plan(build_launcher=True)
+        saved = save_import(plan)
+        self.assertEqual((saved / "source/launcher/LazyBootstrap.exe").read_bytes(), b'compiled')
+        self.assertEqual((saved / "source/启动.exe").read_bytes(), b'compiled')
+        self.assertEqual((saved / legacy / "launcher/LazyBootstrap.exe").read_bytes(), b'archived-main')
+        self.assertFalse((saved / legacy / "启动.exe").exists())
+        self.assertEqual((saved / prefix / "spice/spice64.exe").read_bytes(), b'spice')
+        self.assertEqual(plan.manifest["operations"][-2:], self.operations[-2:])
+        self.assertEqual(import_package(saved).integrity_issues, [])
 
     def test_infer_reference_applies_prior_edits_and_copy_behavior(self):
         self.operations += [

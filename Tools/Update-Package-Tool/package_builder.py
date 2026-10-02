@@ -143,7 +143,7 @@ def prepare(options: Options, progress=lambda message: None, cancel=lambda: None
             raise ValueError("输出目录与输入不能互相包含：" + str(source))
     build_directory = launcher_build.REPO_ROOT / "build"
     if options.build_launcher:
-        # build.ps1 会清空这两个目录，预先保护所有用户选择的输入和输出。
+        # build.bat 会清空这两个目录，预先保护所有用户选择的输入和输出。
         for generated in (build_directory, launcher_build.REPO_ROOT / "build_tmp"):
             for ancestor in [*reversed(generated.parents), generated]:
                 if ancestor.exists() or ancestor.is_symlink():

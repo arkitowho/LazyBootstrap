@@ -46,7 +46,8 @@ namespace LazyBootstrap.UI
 
         private void OnMainSideMenuSelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            if (_isRestoringSideMenuSelection || MainSideMenu == null)
+            // SelectionChanged also bubbles from the ComboBoxes inside the current page.
+            if (_isRestoringSideMenuSelection || MainSideMenu == null || !ReferenceEquals(e.Source, MainSideMenu))
             {
                 return;
             }
@@ -161,15 +162,7 @@ namespace LazyBootstrap.UI
                     await ShowEnvironmentScanErrorDialogAsync();
                 }
 
-                if (_pendingNativeTouchDeprecatedDialog)
-                {
-                    _pendingNativeTouchDeprecatedDialog = false;
-                    await ShowMessageDialogAsync(
-                        "“原生触控输入”选项已弃用",
-                        "新版本spice2x已默认启用原生触控，现有选项已自动关闭并移除",
-                        "我知道了");
-                }
-                else if (!string.IsNullOrWhiteSpace(_pendingNativeTouchMigrationError))
+                if (!string.IsNullOrWhiteSpace(_pendingNativeTouchMigrationError))
                 {
                     string error = _pendingNativeTouchMigrationError;
                     _pendingNativeTouchMigrationError = string.Empty;

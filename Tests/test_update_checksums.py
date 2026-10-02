@@ -14,6 +14,8 @@ import unittest
 from unittest import mock
 import zipfile
 
+from update_file_stat_helpers import directory_size_changes
+
 REPO = Path(__file__).resolve().parents[1]
 sys.dont_write_bytecode = True
 sys.path.insert(0, str(REPO / "Tools"))
@@ -84,6 +86,41 @@ class ChecksumToolTests(unittest.TestCase):
             self.assertEqual(entry["sha256"], hashlib.sha256((self.package / entry["path"]).read_bytes()).hexdigest())
         self.generate()
         self.assertEqual(before, output.read_bytes())
+
+    def test_directory_size_changes_preserve_fingerprint_and_checksums(self):
+        with directory_size_changes():
+            before = tool.fingerprint(self.package)
+            list(self.package.iterdir())
+            self.assertEqual(tool.fingerprint(self.package), before)
+            self.assertEqual(len(before), 5)
+            self.assertEqual(before[2], 0)
+            output = self.generate()
+            document = json.loads(output.read_bytes())
+            self.assertEqual(document["files"][0]["sha256"], hashlib.sha256((self.package / "update").read_bytes()).hexdigest())
+
+    def test_file_size_change_during_hash_preserves_previous_manifest(self):
+        payload = self.package / "source.bin"
+        payload.write_bytes(b"original")
+        output = self.generate()
+        original = output.read_bytes()
+        hashing = False
+        changed = False
+
+        def progress(message):
+            nonlocal hashing
+            hashing = message.startswith("正在计算 SHA-256") and message.endswith("：source.bin")
+
+        def cancel():
+            nonlocal changed
+            if hashing and not changed:
+                payload.write_bytes(b"changed-size")
+                changed = True
+
+        with self.assertRaisesRegex(ValueError, "计算期间文件发生变化"):
+            tool.generate(str(self.package), progress=progress, cancel=cancel)
+        self.assertTrue(changed)
+        self.assertEqual(output.read_bytes(), original)
+        self.assertFalse(list(self.package.glob(".checksums-*.tmp")))
 
     def test_wrapper_and_only_delete_package(self):
         output = self.generate(self.root)

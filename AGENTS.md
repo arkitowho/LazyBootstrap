@@ -36,6 +36,7 @@ The launcher relies heavily on Spice2x's functionality
 
 ## Anti
 
+- 禁止修改、缩短或改写环境检测异常弹窗中的 Near／Noah 长串提示（`MainWindow.Shell.cs` 的 `ShowEnvironmentScanErrorDialogAsync`）；完整原文、颜文字和换行是程序特色，必须保留。
 - Do not use MSBuild, only `dotnet`
 - Do not create or introduce a dependency injection (DI) system or container; construct the fixed application object graph explicitly in `ApplicationComposition`
 - Do not edit any submodules code
@@ -49,5 +50,5 @@ The launcher relies heavily on Spice2x's functionality
 dotnet build LazyBootstrap.sln -c Release
 
 # Package
-pwsh build.ps1
+build.bat
 ```

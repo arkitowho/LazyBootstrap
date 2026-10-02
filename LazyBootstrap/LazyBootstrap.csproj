@@ -11,7 +11,7 @@
         <Nullable>disable</Nullable>
         <ImplicitUsings>disable</ImplicitUsings>
         <InvariantGlobalization>false</InvariantGlobalization>
-        <Version>7.26.6</Version>
+        <Version>7.26.7.1</Version>
         <AssemblyTitle>Launcher for Lazy SDVX</AssemblyTitle>
         <Description>A tool made for SDVX with spice2x</Description>
         <Company>LazyBootstrap - Lazy SDVX</Company>
@@ -39,6 +39,7 @@
     </ItemGroup>
 
     <ItemGroup>
+        <InternalsVisibleTo Include="SettingsRegressionTests"/>
         <PackageReference Include="Avalonia" Version="11.3.17"/>
         <PackageReference Include="Avalonia.Desktop" Version="11.3.17"/>
         <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.7"/>

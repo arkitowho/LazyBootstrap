@@ -6,7 +6,7 @@ namespace LazyBootstrap.Services
 {
     internal sealed class DisplaySettingsRequest
     {
-        public DisplaySettingsRequest(string targetName, string deviceName, int angle, int width, int height, int refreshRate)
+        public DisplaySettingsRequest(string targetName, string deviceName, int angle, int width, int height, int? refreshRate)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(targetName);
             ArgumentException.ThrowIfNullOrWhiteSpace(deviceName);
@@ -29,7 +29,7 @@ namespace LazyBootstrap.Services
 
         public int Height { get; }
 
-        public int RefreshRate { get; }
+        public int? RefreshRate { get; }
     }
 
     internal sealed class DisplaySettingsTransactionResult
@@ -42,6 +42,10 @@ namespace LazyBootstrap.Services
         }
 
         public bool Succeeded { get; }
+
+        public bool Cancelled { get; init; }
+
+        public string UserMessage { get; init; }
 
         public IReadOnlyDictionary<string, DisplayState> RestoreStates { get; }
 
@@ -90,7 +94,7 @@ namespace LazyBootstrap.Services
                 if (cancellationToken.IsCancellationRequested)
                 {
                     messages.Add("已取消显示器配置，正在还原已应用的设置。");
-                    return new DisplaySettingsTransactionResult(false, RollbackAppliedRequests(appliedRequests, restoreStates, messages), messages);
+                    return new DisplaySettingsTransactionResult(false, RollbackAppliedRequests(appliedRequests, restoreStates, messages), messages) { Cancelled = true };
                 }
                 var applyResult = _displayConfigurationService.ApplyDisplaySettings(
                     request.DeviceName,
@@ -105,7 +109,7 @@ namespace LazyBootstrap.Services
                     if (cancellationToken.IsCancellationRequested)
                     {
                         messages.Add("已取消显示器配置，正在还原已应用的设置。");
-                        return new DisplaySettingsTransactionResult(false, RollbackAppliedRequests(appliedRequests, restoreStates, messages), messages);
+                        return new DisplaySettingsTransactionResult(false, RollbackAppliedRequests(appliedRequests, restoreStates, messages), messages) { Cancelled = true };
                     }
                     continue;
                 }

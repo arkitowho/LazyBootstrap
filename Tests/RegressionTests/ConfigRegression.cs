@@ -67,26 +67,96 @@ internal static partial class UpdateRegression
             string message = StartupConfigError.Format(Path.Combine(root, "config.toml"), error);
             Check(message.Contains("\n\n" + reason + "\n\n"), "未知英文错误被翻译或按文字删除");
         });
-        Test("新建显示配置的分辨率和刷新率保持空，重复启动不填入固定值", root =>
+        Test("新建显示配置的分辨率保持空且不生成刷新率记录", root =>
         {
             string path = LauncherConfigPreparation.Prepare(root, root);
             var store = new AppConfigStore(path, null);
-            foreach (string key in new[] { "mainresolution", "subresolution", "mainrefresh", "subrefresh" })
-                Check(store.ReadString("Display", key, null) == string.Empty, $"新建配置预填了 {key}");
-            Check(!store.ReadBool("Display", "displayconfigure", true), "新建配置自动启用了显示设置");
+            foreach (var entry in AppConfigDefaults.Defaults.Where(entry => entry.Section == "Display"))
+            {
+                bool isBoolean = new[] { "displayconfigure", "exitrestore", "compatibilitymode", "maincustomrefresh", "subcustomrefresh" }.Contains(entry.Key);
+                Check(store.ReadString("Display", entry.Key, null) == (entry.Key == "exitrestore" ? "true" : isBoolean ? "false" : string.Empty), $"新建显示配置默认值错误：{entry.Key}");
+            }
+            foreach (string key in new[] { "mainrefresh", "subrefresh" })
+                Check(store.ReadString("Display", key, "missing") == "missing", $"新建配置生成了 {key}");
+            Check(!store.ReadBool("Display", "displayconfigure", false), "新建配置自动启用了显示设置");
             string original = File.ReadAllText(path);
             LauncherConfigPreparation.Prepare(root, root);
             Equal(root, "config.toml", original);
         });
         Test("补齐显示配置使用空值且保留已保存的显示模式", root =>
         {
-            Put(root, "config.toml", "[Display]\nmainresolution = \"2560x1440\"\nmainrefresh = \"144\"\nsubresolution = \"\"\n");
+            Put(root, "config.toml", "[Display]\ndisplayconfigure = \"true\"\ncompatibilitymode = \"true\"\nmainresolution = \"2560x1440\"\nmainrefresh = \"144\"\nsubresolution = \"\"\n");
             string path = LauncherConfigPreparation.Prepare(root, root);
             var store = new AppConfigStore(path, null);
             Check(store.ReadString("Display", "mainresolution") == "2560x1440"
                 && store.ReadString("Display", "mainrefresh") == "144", "补齐配置覆盖了已保存模式");
             Check(store.ReadString("Display", "subresolution", null) == string.Empty, "补齐配置覆盖了空分辨率");
-            Check(store.ReadString("Display", "subrefresh", null) == string.Empty, "缺失的刷新率未补为空值");
+            Check(store.ReadString("Display", "subrefresh", "missing") == "missing", "补齐配置生成了刷新率记录");
+        });
+        Test("未启用与单屏清空显示内容，双屏保存副屏，关闭后保留布尔值", root =>
+        {
+            Put(root, "config.toml", "# keep\n[Display]\ndisplayconfigure = \"false\"\nmode = \"dual\"\nexitrestore = \"true\"\ncompatibilitymode = \"true\"\nmaincustomrefresh = \"true\"\nsubcustomrefresh = \"true\"\nmainresolution = \"1920x1080\"\nsubrefresh = \"144\"\nsubscreen = \"1\"\n");
+            string path = LauncherConfigPreparation.Prepare(root, root);
+            var store = new AppConfigStore(path, null);
+            void CheckEmpty(bool subOnly)
+            {
+                var keys = new[] { "mode", "maindisplayid", "subdisplayid", "mainresolution", "subresolution",
+                    "mainrotation", "subrotation", "mainrefresh", "subrefresh", "mainscreen", "subscreen" };
+                foreach (string key in keys.Where(key => !subOnly || key.StartsWith("sub", StringComparison.Ordinal)))
+                    Check(store.ReadString("Display", key) == string.Empty, $"未使用的显示设置仍有值：{key}");
+            }
+            void CheckBooleanValues(bool enabled)
+            {
+                Check(store.ReadString("Display", "displayconfigure") == enabled.ToString().ToLowerInvariant(), "显示配置启用状态未保存为布尔值");
+                foreach (string key in new[] { "exitrestore", "compatibilitymode", "maincustomrefresh", "subcustomrefresh" })
+                    Check(store.ReadString("Display", key) == "true", $"清空内容时改变了布尔值：{key}");
+            }
+            CheckEmpty(false);
+            CheckBooleanValues(false);
+            var values = new Dictionary<string, string>
+            {
+                ["displayconfigure"] = "true", ["mode"] = "single", ["mainresolution"] = "1920x1080",
+                ["subdisplayid"] = "second", ["subresolution"] = "1280x720", ["subrotation"] = "90",
+                ["subcustomrefresh"] = "true", ["subrefresh"] = "144"
+            };
+            store.WriteSection("Display", values);
+            CheckEmpty(true);
+            CheckBooleanValues(true);
+            Check(store.ReadString("Display", "mainresolution") == "1920x1080", "单屏丢失了主屏配置");
+            LauncherConfigPreparation.Prepare(root, root);
+            CheckEmpty(true);
+            values["mode"] = "dual";
+            store.WriteSection("Display", values);
+            Check(store.ReadString("Display", "subdisplayid") == "second" && store.ReadString("Display", "subrefresh") == "144", "双屏未保存副屏配置");
+            store.WriteSection("Display", new Dictionary<string, string> { ["displayconfigure"] = "false" });
+            CheckEmpty(false);
+            CheckBooleanValues(false);
+            string cleared = File.ReadAllText(path);
+            LauncherConfigPreparation.Prepare(root, root);
+            Equal(root, "config.toml", cleared);
+            CheckBooleanValues(false);
+            Check(cleared.Contains("# keep"), "清空显示配置丢失注释");
+        });
+        Test("兼容模式关闭时清空主副屏刷新率，保留自定义布尔值及其他显示内容", root =>
+        {
+            Put(root, "config.toml", "[Display]\ndisplayconfigure = \"true\"\nmode = \"dual\"\ncompatibilitymode = \"false\"\nmaincustomrefresh = \"true\"\nsubcustomrefresh = \"true\"\nmainrefresh = \"900\"\nsubrefresh = \"91\"\nmainresolution = \"1920x1080\"\nsubresolution = \"1280x720\"\nmainrotation = \"90\"\n");
+            string path = LauncherConfigPreparation.Prepare(root, root);
+            var store = new AppConfigStore(path, null);
+            void CheckClearedRates()
+            {
+                Check(store.ReadString("Display", "mainrefresh") == "" && store.ReadString("Display", "subrefresh") == "", "默认模式保留了 TOML 刷新率");
+                Check(store.ReadString("Display", "maincustomrefresh") == "true" && store.ReadString("Display", "subcustomrefresh") == "true", "清空刷新率改变了自定义开关");
+                Check(store.ReadString("Display", "mainresolution") == "1920x1080" && store.ReadString("Display", "subresolution") == "1280x720"
+                    && store.ReadString("Display", "mainrotation") == "90", "清空刷新率改变了其他显示内容");
+            }
+            CheckClearedRates();
+            store.WriteSection("Display", new Dictionary<string, string> { ["compatibilitymode"] = "true", ["mainrefresh"] = "120", ["subrefresh"] = "75" });
+            Check(store.ReadString("Display", "mainrefresh") == "120" && store.ReadString("Display", "subrefresh") == "75", "兼容模式无法保存刷新率");
+            store.WriteSection("Display", new Dictionary<string, string> { ["compatibilitymode"] = "false" });
+            CheckClearedRates();
+            string cleared = File.ReadAllText(path);
+            LauncherConfigPreparation.Prepare(root, root);
+            Equal(root, "config.toml", cleared);
         });
         Test("共享文档仅修改内存且配置读取不缓存外部变更", root =>
         {
@@ -137,7 +207,7 @@ internal static partial class UpdateRegression
             File.AppendAllText(path, "\n# user comment\n");
             store.WriteSection("Display", new Dictionary<string, string>
             {
-                ["displayconfigure"] = "true", ["maindisplayid"] = "current-monitor",
+                ["displayconfigure"] = "true", ["compatibilitymode"] = "true", ["maindisplayid"] = "current-monitor",
                 ["mainresolution"] = "1920x1080", ["mainrefresh"] = "120", ["mainrotation"] = "90"
             }, "mainscreen");
             Check(store.ReadBool("Display", "displayconfigure", false), "启用状态未保存");

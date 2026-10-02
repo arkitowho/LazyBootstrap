@@ -149,7 +149,6 @@ namespace LazyBootstrap.UI
         private bool _isUpdatingServerPresetUi;
         private bool _isUpdatingAsioDriverUi;
         private bool _isUpdatingNetworkUi;
-        private bool _pendingNativeTouchDeprecatedDialog;
         private string _pendingNativeTouchMigrationError = string.Empty;
 
         /// <summary>Loads the initial (startup) settings and applies them to the UI.</summary>
@@ -165,7 +164,6 @@ namespace LazyBootstrap.UI
             const string optionName = "sdvxnativetouch";
             string spiceXmlPath = _paths.ResolveSpiceXmlPath(_settingsState.UseSystemSpiceConfig);
             bool enabledOptionFound = false;
-            _pendingNativeTouchDeprecatedDialog = false;
             _pendingNativeTouchMigrationError = string.Empty;
 
             try
@@ -219,7 +217,6 @@ namespace LazyBootstrap.UI
                 }
 
                 _spiceXmlConfigEditor.ApplyUpdates(context, [new SpiceOptionUpdate(optionName, string.Empty)]);
-                _pendingNativeTouchDeprecatedDialog = true;
                 _logger.LogInformation("Deprecated native touch option disabled in active spice config: {SpiceXmlPath}", spiceXmlPath);
             }
             catch (Exception ex)
@@ -300,7 +297,7 @@ namespace LazyBootstrap.UI
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Persist compatibility layer render mode failed.");
-                ShowErrorToast("兼容模式保存失败", ex.Message);
+                ShowCompatibilityError();
             }
             finally
             {
@@ -655,7 +652,7 @@ namespace LazyBootstrap.UI
             else
             {
                 _logger.LogWarning("Failed to update DLL injection: {Error}", error);
-                ShowErrorToast("写入配置失败", "无法更新DLL注入设置，请检查配置文件是否可读写。详情请查看日志。");
+                ShowConfigWriteError();
                 ReloadRuntimeState(_settingsState);
             }
             ApplyDllInjectionStateToUi();
@@ -675,25 +672,14 @@ namespace LazyBootstrap.UI
             else
             {
                 _logger.LogWarning("Failed to update near link DLL injection: {Error}", error);
-                ShowErrorToast("写入配置失败", "无法更新全国对战设置，请检查配置文件是否可读写。详情请查看日志。");
+                ShowConfigWriteError();
                 ReloadRuntimeState(_settingsState);
             }
             ApplyDllInjectionStateToUi();
         }
 
         private void OnOpenNearLinkWebsiteClick(object sender, RoutedEventArgs e)
-        {
-            try
-            {
-                ProcessExecutionHelper.StartShellProcess(
-                    "https://near.sdvx.dev/", _paths.ApplicationDirectoryPath, false)?.Dispose();
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to open the Near Link website in the default browser.");
-                ShowErrorToast("无法打开链接", "请检查系统默认浏览器设置后重试。");
-            }
-        }
+            => OpenWebsite("https://near.sdvx.dev/", "无法打开链接");
 
         private void ApplyAsioDriverChoicesFromState()
         {
@@ -787,7 +773,7 @@ namespace LazyBootstrap.UI
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Persist compatibility layer toggle failed.");
-                ShowErrorToast("兼容层切换失败", ex.Message);
+                ShowCompatibilityError();
             }
             finally
             {
@@ -1428,7 +1414,8 @@ namespace LazyBootstrap.UI
             try { executablePath = requestedValue ? _paths.GetOuterLauncherExecutablePath() : string.Empty; }
             catch (FileNotFoundException ex)
             {
-                ShowErrorToast("开机自启动设置失败", ex.Message);
+                _logger.LogWarning(ex, "Outer launcher was not found for Windows startup registration.");
+                ShowErrorToast("开机自启动设置失败", "未找到启动器，请检查程序文件是否完整后重试。");
                 return Task.CompletedTask;
             }
             if (_windowsStartupService.TrySetEnabled(executablePath, requestedValue, out var error))
@@ -1445,11 +1432,11 @@ namespace LazyBootstrap.UI
                 error);
             ShowErrorToast(
                 "开机自启动设置失败",
-                string.IsNullOrWhiteSpace(error) ? "无法更新 Windows 计划任务。" : error);
+                "无法更新开机自启动，请检查系统权限后重试。详情请查看日志。");
             return Task.CompletedTask;
         }
 
-        private async Task LoadDeferredSettingsStateAsync(SettingsState settings)
+        private async Task LoadDeferredSettingsStateAsync(SettingsState settings, bool preserveCurrentSelection = true)
         {
             ArgumentNullException.ThrowIfNull(settings);
             _logger.LogInformation("Deferred settings warm-up started.");
@@ -1462,9 +1449,9 @@ namespace LazyBootstrap.UI
                 return;
             }
 
-            var currentConfiguredAsioDriverName = settings.ConfiguredAsioDriverName;
-            var currentNetworkIp = settings.NetworkAdapterIp;
-            var currentNetworkSubnet = settings.NetworkAdapterSubnet;
+            var currentConfiguredAsioDriverName = preserveCurrentSelection ? settings.ConfiguredAsioDriverName : string.Empty;
+            var currentNetworkIp = preserveCurrentSelection ? settings.NetworkAdapterIp : string.Empty;
+            var currentNetworkSubnet = preserveCurrentSelection ? settings.NetworkAdapterSubnet : string.Empty;
 
             var deferredState = await Task.Run(() =>
             {
@@ -1515,7 +1502,7 @@ namespace LazyBootstrap.UI
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to persist launcher settings.");
-                ShowErrorToast("保存设置失败", ex.Message);
+                ShowSettingsSaveError();
                 TryReloadConfigAfterSaveFailure(() =>
                 {
                     settings.NoAsphyxia = _appConfig.ReadBool(AppConfigDefaults.SettingSectionName, "noasphyxia", false);
@@ -1596,7 +1583,7 @@ namespace LazyBootstrap.UI
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to persist FSO setting.");
-                ShowErrorToast("保存设置失败", ex.Message);
+                ShowSettingsSaveError();
                 TryReloadConfigAfterSaveFailure(() => settings.DisableSpiceFso = _appConfig.ReadBool(AppConfigDefaults.SettingSectionName, DisableFsoConfigKey, false));
                 return Task.CompletedTask;
             }
@@ -1605,7 +1592,6 @@ namespace LazyBootstrap.UI
             if (!File.Exists(spicePath))
             {
                 _logger.LogWarning("FSO registry update skipped because spice64.exe was not found: {SpicePath}", spicePath);
-                ShowWarningToast("FSO 设置已保存", $"未找到 spice64.exe，启动游戏前会再次尝试应用：{spicePath}");
                 return Task.CompletedTask;
             }
 
@@ -1616,7 +1602,7 @@ namespace LazyBootstrap.UI
             }
 
             _logger.LogWarning("FSO registry setting failed: {Error}", error);
-            ShowErrorToast("FSO 设置失败", string.IsNullOrWhiteSpace(error) ? "未知错误" : error);
+            ShowSystemSettingsError("全屏优化设置失败");
             bool actualDisabled = _appCompatLayerService.IsFsoDisabled(spicePath);
             settings.DisableSpiceFso = actualDisabled;
             try
@@ -1660,24 +1646,25 @@ namespace LazyBootstrap.UI
                 return ConfirmAndEnableGpuCompatLayerAsync(settings);
             }
 
+            ApplyGpuCompatLayerToggle(settings, settings.GpuCompatLayerEnabled);
+            return Task.CompletedTask;
+        }
+
+        private void ApplyGpuCompatLayerToggle(SettingsState settings, bool enabled)
+        {
             var renderMode = GpuCompatLayerConfigurator.NormalizeRenderMode(settings.GpuCompatLayerRenderMode);
             string spiceXmlPath = _paths.ResolveSpiceXmlPath(settings.UseSystemSpiceConfig);
-            if (_gpuCompatLayerConfigurator.TryToggleGpuCompatLayer(
-                    settings.GpuCompatLayerEnabled,
-                    renderMode,
-                    spiceXmlPath,
-                    out var error))
+            if (_gpuCompatLayerConfigurator.TryToggleGpuCompatLayer(enabled, renderMode, spiceXmlPath, out var error))
             {
                 settings.GpuCompatLayerRenderMode = renderMode;
-                RefreshGpuCompatLayerState(settings);
-                _logger.LogInformation("GPU compatibility layer toggle persistence completed.");
-                return Task.CompletedTask;
+                _logger.LogInformation("GPU compatibility layer toggle completed. Enabled={Enabled}", enabled);
             }
-
-            _logger.LogWarning("GPU compatibility layer toggle persistence failed.");
-            ShowErrorToast("兼容层切换失败", string.IsNullOrWhiteSpace(error) ? "未知错误" : error);
+            else
+            {
+                _logger.LogWarning("GPU compatibility layer toggle failed. Enabled={Enabled}, Error={Error}", enabled, error);
+                ShowCompatibilityError();
+            }
             RefreshGpuCompatLayerState(settings);
-            return Task.CompletedTask;
         }
 
         private Task PersistGpuCompatLayerRenderModeAsync(SettingsState settings)
@@ -1700,8 +1687,8 @@ namespace LazyBootstrap.UI
                 return Task.CompletedTask;
             }
 
-            _logger.LogWarning("GPU compatibility layer render mode persistence failed.");
-            ShowErrorToast("兼容模式切换失败", string.IsNullOrWhiteSpace(error) ? "未知错误" : error);
+            _logger.LogWarning("GPU compatibility layer render mode persistence failed: {Error}", error);
+            ShowCompatibilityError();
             RefreshGpuCompatLayerState(settings);
             return Task.CompletedTask;
         }
@@ -1730,7 +1717,7 @@ namespace LazyBootstrap.UI
             string arguments = Spice64CommandLine.BuildConfigEditorArguments(settings.UseSystemSpiceConfig);
             try
             {
-                var process = Process.Start(new ProcessStartInfo
+                using var process = Process.Start(new ProcessStartInfo
                 {
                     FileName = spicePath,
                     Arguments = arguments,
@@ -1748,13 +1735,30 @@ namespace LazyBootstrap.UI
                 _logger.LogInformation("spicecfg editor process started. ProcessId={ProcessId}", process.Id);
                 await process.WaitForExitAsync();
                 _logger.LogInformation("spicecfg editor process exited. ExitCode={ExitCode}", process.ExitCode);
-                await LoadSettingsStateAsync(settings);
-                await LoadDeferredSettingsStateAsync(settings);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "spicecfg editor launch failed.");
-                ShowErrorToast("启动 spice 配置失败", ex.Message);
+                ShowErrorToast("启动 spice 配置失败", "请检查程序文件是否完整及运行权限后重试。详情请查看日志。");
+                return;
+            }
+
+            try
+            {
+                await LoadSettingsStateAsync(settings);
+                // spicecfg owns the latest XML values, including cleared ASIO/network selections.
+                await LoadDeferredSettingsStateAsync(settings, preserveCurrentSelection: false);
+                ReadSpiceRefreshRateSelections(_displayState);
+                await HandleConfigurationChangedAsync(_displayState, true, true, persist: false);
+                UpdateDisplayStartupInfo(_displayState);
+                ApplyDisplayStateToUi();
+                _logger.LogInformation("Settings reloaded after spicecfg exit. SpiceXmlPath={SpiceXmlPath}",
+                    _paths.ResolveSpiceXmlPath(settings.UseSystemSpiceConfig));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to reload settings after spicecfg exit.");
+                ShowErrorToast("配置刷新失败", "无法重新读取 spice2x 配置，请检查配置文件是否有效及读取权限后重试。详情请查看日志。");
             }
         }
 
@@ -1801,7 +1805,7 @@ namespace LazyBootstrap.UI
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to persist use-system-config.");
-                ShowErrorToast("保存设置失败", ex.Message);
+                ShowSettingsSaveError();
                 TryReloadConfigAfterSaveFailure(() => settings.UseSystemSpiceConfig = _appConfig.ReadBool(AppConfigDefaults.SettingSectionName, UseSystemConfigKey, false));
             }
 
@@ -1837,22 +1841,7 @@ namespace LazyBootstrap.UI
                 }
             }
 
-            string spiceXmlPath = _paths.ResolveSpiceXmlPath(settings.UseSystemSpiceConfig);
-            if (_gpuCompatLayerConfigurator.TryToggleGpuCompatLayer(
-                    true,
-                    renderMode,
-                    spiceXmlPath,
-                    out var error))
-            {
-                settings.GpuCompatLayerRenderMode = renderMode;
-                RefreshGpuCompatLayerState(settings);
-                _logger.LogInformation("GPU compatibility layer enable completed.");
-                return;
-            }
-
-            _logger.LogWarning("GPU compatibility layer enable failed.");
-            ShowErrorToast("兼容层切换失败", string.IsNullOrWhiteSpace(error) ? "未知错误" : error);
-            RefreshGpuCompatLayerState(settings);
+            ApplyGpuCompatLayerToggle(settings, true);
         }
 
         private bool HasGpuCompatLayerModulesDirectory()
@@ -1874,10 +1863,10 @@ namespace LazyBootstrap.UI
             _logger.LogInformation("ASIO control panel open requested.");
             if (!AsioDriverRegistry.TryOpenControlPanel(driverName, out var errorMessage))
             {
-                _logger.LogWarning("ASIO control panel open failed.");
+                _logger.LogWarning("ASIO control panel open failed: {Error}", errorMessage);
                 ShowWarningToast(
                     "ASIO 控制面板",
-                    string.IsNullOrWhiteSpace(errorMessage) ? "无法打开当前选择的 ASIO 驱动控制面板。" : errorMessage);
+                    "无法打开当前选择的 ASIO 驱动控制面板，请检查驱动安装后重试。详情请查看日志。");
             }
 
             return Task.CompletedTask;
@@ -2314,7 +2303,7 @@ namespace LazyBootstrap.UI
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to save server presets.");
-                ShowErrorToast("保存预设失败", ex.Message);
+                ShowSettingsSaveError("保存预设失败");
                 return false;
             }
         }
@@ -2329,8 +2318,8 @@ namespace LazyBootstrap.UI
             _logger.LogDebug("Applying spice option updates. UpdateCount={UpdateCount}", updateCount);
             if (!_spiceXmlConfigEditor.ApplySpiceOptions(spiceXmlPath, updates, out var error))
             {
-                _logger.LogWarning("Failed to apply spice option updates. UpdateCount={UpdateCount}", updateCount);
-                ShowErrorToast("写入配置失败", error);
+                _logger.LogWarning("Failed to apply spice option updates. UpdateCount={UpdateCount}, Error={Error}", updateCount, error);
+                ShowConfigWriteError();
                 return false;
             }
 

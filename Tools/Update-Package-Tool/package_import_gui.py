@@ -166,9 +166,9 @@ class PackageEditor(tk.Toplevel):
         ttk.Label(self.settings, text="另存为名称固定以 UPDATE_LAZY_KFC_ 开头。覆盖前请检查预览中的原目录与备份位置。",
                   wraplength=950).grid(row=5, column=0, columnspan=3, sticky="w")
         for row, (name, label) in enumerate((("download_spice", "下载最新 spice2x（仅 spice64.exe）"), ("include_prerelease", "spice2x 包含预发布"),
-                                            ("asphyxia_enabled", "下载最新 asphyxia KFC 插件"), ("build_launcher", "运行 build.ps1 编译启动器（含 launcher 和启动.exe）")), 6):
+                                            ("asphyxia_enabled", "下载最新 asphyxia KFC 插件"), ("build_launcher", "运行 build.bat 编译启动器（含 launcher 和启动.exe）")), 6):
             ttk.Checkbutton(self.settings, text=label, variable=self.flags[name]).grid(row=row, column=0, columnspan=3, sticky="w", pady=6)
-        ttk.Label(self.settings, text="组件全部默认关闭。所选组件使用独立载荷路径，操作追加到当前清单末尾。\n启动器在预览时编译，会重建仓库 build；launcher 镜像会移除游戏目标的多余文件。\n版本日期请使用 XML 规则编辑；导入模式不会排除 ea3-ident.xml。",
+        ttk.Label(self.settings, text="组件全部默认关闭。下载组件使用独立载荷路径，操作追加到当前清单末尾。\n启动器在预览时编译，覆盖 source/launcher 和 source/启动.exe；launcher 镜像会移除游戏目标的多余文件。\n编译会重建仓库 build。版本日期请使用 XML 规则编辑；导入模式不会排除 ea3-ident.xml。",
                   wraplength=940, foreground="#9A4E00").grid(row=10, column=0, columnspan=3, sticky="w", pady=8)
         self.preview_text = ScrolledText(self.preview_page, wrap="none", state="disabled")
         self.preview_text.pack(fill="both", expand=True)
@@ -519,7 +519,9 @@ class PackageEditor(tk.Toplevel):
             text = "输出位置：" + str(plan.destination) + "\n"
             if plan.backup:
                 text += "覆盖原目录：" + str(plan.session.root) + "\n成功后保留备份：" + str(plan.backup) + "\n"
-            text += "组件载荷位置：" + plan.component_prefix + "\n" if any((options.download_spice, options.build_launcher, options.asphyxia_enabled)) else ""
+            if options.build_launcher:
+                text += "启动器载荷位置：source/launcher、source/启动.exe（替换旧载荷）\n"
+            text += "下载组件载荷位置：" + plan.component_prefix + "\n" if any((options.download_spice, options.asphyxia_enabled)) else ""
             text += "\n静态检查不是安装验证；实际匹配由 MediaUpdater 预演。\n\n"
             text += json.dumps(plan.manifest, ensure_ascii=False, indent=2)
             put_text(self.preview_text, text, True)
